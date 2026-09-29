@@ -17,14 +17,54 @@
     </form>
   </div>
 
-  <main id="site" hidden>
-    <header class="topbar">
-      <h1 id="home-title">SEU website</h1>
+  <div id="site" hidden>
+    <aside class="sidebar">
+      <div class="brand">SEU website</div>
+      <nav>
+        <button data-section="home" class="active" type="button">Home</button>
+        <button data-section="projects" type="button">Projects</button>
+        <button data-section="links" type="button">Links</button>
+        <button data-section="resources" type="button">Resources</button>
+      </nav>
       <button id="logout" type="button">Log out</button>
-    </header>
-    <p id="home-welcome" class="welcome">Welcome to seuhq.dpdns.org</p>
-    <section id="cards" class="cards"></section>
-  </main>
+    </aside>
+
+    <main>
+      <section id="sec-home">
+        <h1 id="home-title">SEU website</h1>
+        <p id="home-welcome" class="welcome">Welcome to seuhq.dpdns.org</p>
+        <div id="cards" class="cards"></div>
+      </section>
+
+      <section id="sec-projects" hidden>
+        <h1>Projects</h1>
+        <p class="welcome">Things built at SEU HQ.</p>
+        <div class="cards">
+          <article class="card"><h2>SEU website</h2><p>This site — password-gated HQ homescreen.</p></article>
+          <article class="card"><h2>Project two</h2><p>Describe your next build here.</p></article>
+          <article class="card"><h2>Project three</h2><p>Describe another build here.</p></article>
+        </div>
+      </section>
+
+      <section id="sec-links" hidden>
+        <h1>Links</h1>
+        <p class="welcome">Quick jumps.</p>
+        <ul class="linklist">
+          <li><a href="https://github.com/uxp70">GitHub — uxp70</a></li>
+          <li><a href="https://github.com/uxp70/SEU-website">Site repo</a></li>
+        </ul>
+      </section>
+
+      <section id="sec-resources" hidden>
+        <h1>Resources</h1>
+        <p class="welcome">Docs and references.</p>
+        <ul class="linklist">
+          <li><a href="https://docs.github.com/en/pages">GitHub Pages docs</a></li>
+          <li><a href="https://render.com/docs">Render docs</a></li>
+        </ul>
+      </section>
+    </main>
+  </div>
 
   <script>
     // Backend origin (Render). Same login, but verified server-side.
@@ -45,12 +85,10 @@
       { title: "Status", text: "All systems normal." }
     ];
 
-    function showSite(data) {
-      document.getElementById("home-title").textContent = data.title || "SEU website";
-      document.getElementById("home-welcome").textContent = data.welcome || "Welcome to seuhq.dpdns.org";
-      const cards = document.getElementById("cards");
-      cards.innerHTML = "";
-      for (const c of (data.cards || FALLBACK_CARDS)) {
+    function renderCards(cards) {
+      const box = document.getElementById("cards");
+      box.innerHTML = "";
+      for (const c of (cards || FALLBACK_CARDS)) {
         const el = document.createElement("article");
         el.className = "card";
         const h = document.createElement("h2");
@@ -58,11 +96,31 @@
         const p = document.createElement("p");
         p.textContent = c.text;
         el.append(h, p);
-        cards.append(el);
+        box.append(el);
       }
+    }
+
+    function showSite(data) {
+      document.getElementById("home-title").textContent = data.title || "SEU website";
+      document.getElementById("home-welcome").textContent = data.welcome || "Welcome to seuhq.dpdns.org";
+      renderCards(data.cards);
       gate.hidden = true;
       site.hidden = false;
+      showSection("home");
     }
+
+    function showSection(name) {
+      for (const btn of document.querySelectorAll(".sidebar nav button")) {
+        btn.classList.toggle("active", btn.dataset.section === name);
+      }
+      for (const sec of document.querySelectorAll("main section")) {
+        sec.hidden = sec.id !== "sec-" + name;
+      }
+    }
+
+    document.querySelectorAll(".sidebar nav button").forEach(btn => {
+      btn.addEventListener("click", () => showSection(btn.dataset.section));
+    });
 
     // Pure-JS SHA-256: browsers disable crypto.subtle on plain http://,
     // and this site has no HTTPS cert yet, so this is the login path.
@@ -133,7 +191,7 @@
       const home = await fetch(API_BASE + "/api/home", { credentials: "include" });
       if (!home.ok) return false;
       showSite(await home.json());
-      sessionStorage.setItem("seu-auth", "backend");
+      localStorage.setItem("seu-auth", "backend");
       return true;
     }
 
@@ -150,11 +208,11 @@
     }
 
     async function init() {
-      // Prefer backend session if a backend is reachable.
+      // Backend session cookie persists across tabs until logout/expiry.
       try {
-        if (await resumeBackend()) return;
+        if (await resumeBackend()) { localStorage.setItem("seu-auth", "backend"); return; }
       } catch { /* fall through to gate */ }
-      if (sessionStorage.getItem("seu-auth") === "local") {
+      if (localStorage.getItem("seu-auth") === "local") {
         showSite({ title: "SEU website", welcome: "Welcome to seuhq.dpdns.org", cards: FALLBACK_CARDS });
       }
     }
@@ -167,9 +225,9 @@
       try {
         if (await backendLogin(password)) { input.value = ""; return; }
       } catch { /* backend unreachable -> fallback below */ }
-      // 2) Fallback: local hash check (works while backend is not deployed).
+      // 2) Fallback: local hash check (works while backend is asleep/unreachable).
       if ((await sha256Hex(password)) === FALLBACK_HASH) {
-        sessionStorage.setItem("seu-auth", "local");
+        localStorage.setItem("seu-auth", "local");
         input.value = "";
         showSite({ title: "SEU website", welcome: "Welcome to seuhq.dpdns.org", cards: FALLBACK_CARDS });
       } else {
@@ -181,7 +239,7 @@
 
     logoutBtn.addEventListener("click", async () => {
       try { await fetch(API_BASE + "/api/logout", { method: "POST", credentials: "include" }); } catch {}
-      sessionStorage.removeItem("seu-auth");
+      localStorage.removeItem("seu-auth");
       site.hidden = true;
       gate.hidden = false;
       input.focus();

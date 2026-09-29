@@ -57,6 +57,15 @@ function newSession() {
   return token;
 }
 
+function sessionCookie(token, req) {
+  // Production (Render) terminates TLS: cross-site frontend needs SameSite=None; Secure.
+  // Local http dev keeps Lax.
+  const secure = req.headers["x-forwarded-proto"] === "https";
+  const maxAge = token ? 43200 : 0;
+  const attrs = `HttpOnly; Path=/; Max-Age=${maxAge}; ${secure ? "SameSite=None; Secure" : "SameSite=Lax"}`;
+  return token ? `seu_session=${token}; ${attrs}` : `seu_session=; ${attrs}`;
+}
+
 function validSession(token) {
   if (!token) return false;
   const exp = sessions.get(token);
@@ -92,9 +101,7 @@ const server = http.createServer(async (req, res) => {
     catch { return send(res, 400, { ok: false, error: "bad json" }); }
     if (PASSWORD_HASH && timingSafeEqualHex(sha256Hex(password), PASSWORD_HASH)) {
       const token = newSession();
-      const secure = (req.headers["x-forwarded-proto"] === "https");
-      const cookie = `seu_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=43200${secure ? "; Secure" : ""}`;
-      return send(res, 200, { ok: true }, { "Set-Cookie": cookie });
+      return send(res, 200, { ok: true }, { "Set-Cookie": sessionCookie(token, req) });
     }
     return send(res, 401, { ok: false, error: "wrong password" });
   }
@@ -107,7 +114,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/api/logout") {
     const t = parseCookies(req).seu_session;
     if (t) sessions.delete(t);
-    res.setHeader("Set-Cookie", "seu_session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax");
+    res.setHeader("Set-Cookie", sessionCookie(null, req));
     return send(res, 200, { ok: true });
   }
 
