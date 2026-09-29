@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: seu-backend
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install --omit=dev || true
+    startCommand: node server.js
+    envVars:
+      - key: SEU_PASSWORD_HASH
+        sync: false
+      - key: SEU_SECRET
+        generateValue: true
+      - key: ALLOWED_ORIGINS
+        value: http://seuhq.dpdns.org,https://seuhq.dpdns.org

@@ -18,19 +18,49 @@
   </div>
 
   <main id="site" hidden>
-    <h1>SEU website</h1>
-    <p>Welcome to seuhq.dpdns.org</p>
+    <header class="topbar">
+      <h1 id="home-title">SEU website</h1>
+      <button id="logout" type="button">Log out</button>
+    </header>
+    <p id="home-welcome" class="welcome">Welcome to seuhq.dpdns.org</p>
+    <section id="cards" class="cards"></section>
   </main>
 
   <script>
-    const HASH = "3ef1d7e4be25371da4a48396925dee4f369088e794959baa69b3cc4886f758a3";
+    // Set to your backend origin when deployed, e.g. "https://api.seuhq.dpdns.org".
+    // Empty string = same-origin /api (works if frontend + backend share a host).
+    const API_BASE = "";
+    // Offline fallback hash (used only if backend is unreachable).
+    const FALLBACK_HASH = "3ef1d7e4be25371da4a48396925dee4f369088e794959baa69b3cc4886f758a3";
+
     const gate = document.getElementById("gate");
     const site = document.getElementById("site");
     const form = document.getElementById("gate-form");
     const input = document.getElementById("gate-input");
     const error = document.getElementById("gate-error");
+    const logoutBtn = document.getElementById("logout");
 
-    if (sessionStorage.getItem("seu-auth") === "1") {
+    const FALLBACK_CARDS = [
+      { title: "Projects", text: "SEU builds and experiments live here." },
+      { title: "Links", text: "Add quick links here next." },
+      { title: "Status", text: "All systems normal." }
+    ];
+
+    function showSite(data) {
+      document.getElementById("home-title").textContent = data.title || "SEU website";
+      document.getElementById("home-welcome").textContent = data.welcome || "Welcome to seuhq.dpdns.org";
+      const cards = document.getElementById("cards");
+      cards.innerHTML = "";
+      for (const c of (data.cards || FALLBACK_CARDS)) {
+        const el = document.createElement("article");
+        el.className = "card";
+        const h = document.createElement("h2");
+        h.textContent = c.title;
+        const p = document.createElement("p");
+        p.textContent = c.text;
+        el.append(h, p);
+        cards.append(el);
+      }
       gate.hidden = true;
       site.hidden = false;
     }
@@ -40,19 +70,72 @@
       return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
     }
 
+    async function backendLogin(password) {
+      const r = await fetch(API_BASE + "/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ password })
+      });
+      if (!r.ok) return false;
+      const home = await fetch(API_BASE + "/api/home", { credentials: "include" });
+      if (!home.ok) return false;
+      showSite(await home.json());
+      sessionStorage.setItem("seu-auth", "backend");
+      return true;
+    }
+
+    async function resumeBackend() {
+      try {
+        const me = await fetch(API_BASE + "/api/me", { credentials: "include" });
+        if (!me.ok) return false;
+        if (!(await me.json()).ok) return false;
+        const home = await fetch(API_BASE + "/api/home", { credentials: "include" });
+        if (!home.ok) return false;
+        showSite(await home.json());
+        return true;
+      } catch { return false; }
+    }
+
+    async function init() {
+      // Prefer backend session if a backend is reachable.
+      try {
+        if (await resumeBackend()) return;
+      } catch { /* fall through to gate */ }
+      if (sessionStorage.getItem("seu-auth") === "local") {
+        showSite({ title: "SEU website", welcome: "Welcome to seuhq.dpdns.org", cards: FALLBACK_CARDS });
+      }
+    }
+
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const hash = await sha256Hex(input.value);
-      if (hash === HASH) {
-        sessionStorage.setItem("seu-auth", "1");
-        gate.hidden = true;
-        site.hidden = false;
+      error.hidden = true;
+      const password = input.value;
+      // 1) Try backend first.
+      try {
+        if (await backendLogin(password)) { input.value = ""; return; }
+      } catch { /* backend unreachable -> fallback below */ }
+      // 2) Fallback: local hash check (works while backend is not deployed).
+      if ((await sha256Hex(password)) === FALLBACK_HASH) {
+        sessionStorage.setItem("seu-auth", "local");
+        input.value = "";
+        showSite({ title: "SEU website", welcome: "Welcome to seuhq.dpdns.org", cards: FALLBACK_CARDS });
       } else {
         error.hidden = false;
         input.value = "";
         input.focus();
       }
     });
+
+    logoutBtn.addEventListener("click", async () => {
+      try { await fetch(API_BASE + "/api/logout", { method: "POST", credentials: "include" }); } catch {}
+      sessionStorage.removeItem("seu-auth");
+      site.hidden = true;
+      gate.hidden = false;
+      input.focus();
+    });
+
+    init();
   </script>
 </body>
 </html>
