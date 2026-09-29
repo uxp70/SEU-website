@@ -9,6 +9,60 @@ body {
   text-align: center;
 }
 
+#gate {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+}
+
+#gate[hidden] {
+  display: none;
+}
+
+#gate-form {
+  background: #1e293b;
+  padding: 2rem;
+  border-radius: 12px;
+  min-width: 280px;
+}
+
+#gate-form h1 {
+  font-size: 1.8rem;
+  margin: 0 0 0.5rem;
+}
+
+#gate-form p {
+  opacity: 0.7;
+  margin: 0 0 1rem;
+}
+
+#gate-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.6rem;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #f8fafc;
+  margin-bottom: 0.75rem;
+}
+
+#gate-form button {
+  width: 100%;
+  padding: 0.6rem;
+  border: 0;
+  border-radius: 8px;
+  background: #38bdf8;
+  color: #082f49;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+#gate-error {
+  color: #f87171;
+  margin: 0.75rem 0 0;
+}
+
 main {
   padding: 2rem;
 }

@@ -7,9 +7,52 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <main>
+  <div id="gate">
+    <form id="gate-form">
+      <h1>SEU website</h1>
+      <p>Enter password to continue</p>
+      <input id="gate-input" type="password" autocomplete="off" placeholder="Password" />
+      <button type="submit">Enter</button>
+      <p id="gate-error" hidden>Wrong password</p>
+    </form>
+  </div>
+
+  <main id="site" hidden>
     <h1>SEU website</h1>
     <p>Welcome to seuhq.dpdns.org</p>
   </main>
+
+  <script>
+    const HASH = "3ef1d7e4be25371da4a48396925dee4f369088e794959baa69b3cc4886f758a3";
+    const gate = document.getElementById("gate");
+    const site = document.getElementById("site");
+    const form = document.getElementById("gate-form");
+    const input = document.getElementById("gate-input");
+    const error = document.getElementById("gate-error");
+
+    if (sessionStorage.getItem("seu-auth") === "1") {
+      gate.hidden = true;
+      site.hidden = false;
+    }
+
+    async function sha256Hex(text) {
+      const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+      return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const hash = await sha256Hex(input.value);
+      if (hash === HASH) {
+        sessionStorage.setItem("seu-auth", "1");
+        gate.hidden = true;
+        site.hidden = false;
+      } else {
+        error.hidden = false;
+        input.value = "";
+        input.focus();
+      }
+    });
+  </script>
 </body>
 </html>
