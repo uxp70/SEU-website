@@ -93,9 +93,11 @@ const SEU_REPO_PREVIEW = "https://raw.githubusercontent.com/DatOneFlareon/The-SE
 
 const IPA_SOURCES = [
   { id: "fastsign", name: "Alan's Gigantic Repo", url: "https://fastsign.dev/repo.json" },
+  { id: "apptesters", name: "AppTesters IPA Repo", url: "https://repository.apptesters.org" },
   { id: "cypwn", name: "CyPwn IPA Library", url: "https://ipa.cypwn.xyz/cypwn.json" },
   { id: "quantum", name: "Quantum Source", url: "https://quarksources.github.io/quantumsource.json" },
-  { id: "sidestore", name: "SideStore Team Picks", url: "https://community-apps.sidestore.io/sidecommunity.json" }
+  { id: "sidestore", name: "SideStore Team Picks", url: "https://community-apps.sidestore.io/sidecommunity.json" },
+  { id: "wuxu", name: "WuXu's Library", url: "https://wuxu1.github.io/wuxu-complete.json" }
 ];
 const FEED_TTL_MS = 30 * 60 * 1000;
 const feedCache = {};
@@ -133,6 +135,16 @@ async function getFeed(id) {
 }
 
 const FEATURED_NAMES = ["Delta", "DolphiniOS", "PPSSPP", "RetroArch", "UTM SE", "StikDebug", "SideStore", "Scarlet", "Filza"];
+
+async function getAllFeeds() {
+  // Sequential: avoids parsing multiple giant feeds at once on small hosts.
+  const feeds = [];
+  for (const s of IPA_SOURCES) {
+    try { feeds.push(await getFeed(s.id)); }
+    catch { feeds.push(null); }
+  }
+  return feeds;
+}
 
 function fetchBig(url, maxBytes) {
   return new Promise((resolve, reject) => {
@@ -355,7 +367,7 @@ const server = http.createServer(async (req, res) => {
     const page = Math.max(0, parseInt(url.searchParams.get("page") || "0", 10) || 0);
     const limit = Math.min(50, Math.max(1, parseInt(url.searchParams.get("limit") || "25", 10) || 25));
     try {
-      const feeds = await Promise.all(IPA_SOURCES.map(s => getFeed(s.id).catch(() => null)));
+      const feeds = await getAllFeeds();
       const all = [];
       for (let i = 0; i < feeds.length; i++) {
         if (!feeds[i]) continue;
@@ -381,7 +393,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     try {
-      const feeds = await Promise.all(IPA_SOURCES.map(s => getFeed(s.id).catch(() => null)));
+      const feeds = await getAllFeeds();
       const out = [];
       for (const name of FEATURED_NAMES) {
         const want = name.toLowerCase();
