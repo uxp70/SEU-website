@@ -341,6 +341,17 @@ const server = http.createServer(async (req, res) => {
     if (filesCache.data.length && now - filesCache.at < FILES_TTL_MS) return filesCache.data;
     if (filesFetching) return filesFetching;
     filesFetching = (async () => {
+      // Preferred: prebuilt public list (no GitHub API, no rate limits).
+      try {
+        const lr = await fetchUpstream(`https://raw.githubusercontent.com/${RFW_OWNER}/${RFW_REPO}/${RFW_BRANCH}/uploads/list.json?ts=${Date.now()}`);
+        if (lr.status === 200) {
+          const parsed = JSON.parse(lr.body);
+          if (Array.isArray(parsed)) {
+            filesCache = { at: Date.now(), data: parsed };
+            return parsed;
+          }
+        }
+      } catch { /* fall back to API listing below */ }
       const up = await fetchGitHub(`/repos/${RFW_OWNER}/${RFW_REPO}/contents/uploads?ref=${encodeURIComponent(RFW_BRANCH)}`);
       if (up.status !== 200) throw new Error("github " + up.status);
       const items = JSON.parse(up.body);
