@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SEU website</title>
+  <link id="favicon" rel="icon" type="image/png" href="https://raw.githubusercontent.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang/refs/heads/main/Ipa%20file/Seu%20logo.png" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -280,6 +281,12 @@
 
     // Logo: local file first, repo-hosted SEU logo as fallback.
     const SEU_LOGO_FALLBACK = "https://raw.githubusercontent.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang/refs/heads/main/Ipa%20file/Seu%20logo.png";
+    const probe = new Image();
+    probe.onload = () => {
+      document.getElementById("favicon").href = "logo.png";
+      document.querySelectorAll("img.logo").forEach(img => { img.src = "logo.png"; });
+    };
+    probe.src = "logo.png";
     document.querySelectorAll("img.logo").forEach(img => {
       img.addEventListener("error", () => {
         if (!img.dataset.fbk && img.src !== SEU_LOGO_FALLBACK) {
