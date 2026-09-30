@@ -207,7 +207,7 @@ const server = http.createServer(async (req, res) => {
       } catch { /* index optional: big files show as cooking */ }
       const files = [];
       for (const x of list) {
-        if (x.type !== "file" || /\.part\d+$/.test(x.name) || x.name === "files-index.json") continue;
+        if (x.type !== "file" || /\.part\d+$/.test(x.name) || x.name === "files-index.json" || x.name === ".gitkeep") continue;
         if (x.name.endsWith(".manifest.json")) {
           let original = x.name, size = x.size;
           try {
