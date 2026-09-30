@@ -959,19 +959,36 @@
     }
 
     // Render's free tier sleeps when idle: retry while it wakes up.
+    // Failure kinds are tracked so the final error can say what happened.
     async function withWakeUpRetries(fn, label) {
       let lastErr = null;
+      const kinds = { timeout: 0, network: 0, http: 0 };
       for (let attempt = 1; attempt <= 4; attempt++) {
         try {
           return await fn();
         } catch (e) {
           lastErr = e;
           if (e.status === 401) throw e; // wrong password / no session: don't retry
+          if (e.name === "AbortError") kinds.timeout++;
+          else if (e.status) { kinds.http++; lastErr.httpStatus = e.status; }
+          else kinds.network++;
           setStatus(label + " (attempt " + attempt + "/4)...");
           await new Promise(r => setTimeout(r, attempt * 5000));
         }
       }
+      lastErr.kinds = kinds;
       throw lastErr;
+    }
+
+    function unreachableMessage(err) {
+      const k = (err && err.kinds) || {};
+      if (err && err.httpStatus) {
+        return "Server error " + err.httpStatus + " - try again in a minute.";
+      }
+      if (k.timeout && !k.network && !k.http) {
+        return "Timed out reaching the server 4 times. Something on this phone may be blocking it (VPN, adblocker, or DNS filter) - try WiFi vs mobile data, and disable VPN/adblock for this site.";
+      }
+      return "Couldn't reach the server at all. Check internet, turn off VPN/adblocker, then retry.";
     }
 
     async function backendLogin(password) {
@@ -1059,7 +1076,7 @@
           ? "Wrong password"
           : err && err.stuck
             ? "Password accepted, but this browser won't hold the session. Try Chrome, or turn off 'Prevent Cross-Site Tracking' in Settings."
-            : "Server unreachable - try again";
+            : unreachableMessage(err);
         input.value = "";
         input.focus();
       }
