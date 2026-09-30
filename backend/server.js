@@ -51,11 +51,42 @@ function clientIp(req) {
   return fwd || (req.socket && req.socket.remoteAddress) || "unknown";
 }
 
-// In-memory sessions: token -> expiry timestamp. Single-instance only.
-const sessions = new Map();
+// Stateless IP-bound sessions: HMAC-signed tokens, no server storage.
+// Anyone with the password gets one; it survives restarts/redeploys and
+// only works from the IP that logged in (auto-rejoin for 12h).
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
+function signSession(expHex, ip) {
+  return crypto.createHmac("sha256", SECRET).update(expHex + "." + ip, "utf8").digest("hex");
+}
+
+function newSession(ip) {
+  const expHex = (Date.now() + SESSION_TTL_MS).toString(16);
+  return expHex + "." + signSession(expHex, ip);
+}
+
+function validSession(token, ip) {
+  if (!token || typeof token !== "string") return false;
+  const parts = token.split(".");
+  if (parts.length !== 2 || !/^[a-f0-9]+$/.test(parts[0]) || !/^[a-f0-9]{64}$/.test(parts[1])) {
+    return false;
+  }
+  const exp = parseInt(parts[0], 16);
+  if (!exp || exp < Date.now()) return false;
+  try {
+    const a = Buffer.from(parts[1], "hex");
+    const b = Buffer.from(signSession(parts[0], ip), "hex");
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return false;
+  } catch { return false; }
+  if (loggedOut.has(token)) return false;
+  return true;
+}
+
+// Tokens explicitly logged out before expiry. Small by design.
+const loggedOut = new Map();
+
 if (!PASSWORD_HASH) console.warn("WARN: SEU_PASSWORD_HASH is not set - all logins will fail.");
+if (!process.env.SEU_SECRET) console.warn("WARN: SEU_SECRET is not set - sessions use an insecure default.");
 
 function send(res, status, obj, headers = {}) {
   const body = JSON.stringify(obj);
@@ -92,12 +123,6 @@ function timingSafeEqualHex(a, b) {
     const bb = Buffer.from(b, "hex");
     return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
   } catch { return false; }
-}
-
-function newSession() {
-  const token = crypto.randomBytes(32).toString("hex");
-  sessions.set(token, Date.now() + SESSION_TTL_MS);
-  return token;
 }
 
 function sessionCookie(token, req) {
@@ -651,17 +676,9 @@ function fetchGitHub(path) {
   });
 }
 
-function validSession(token) {
-  if (!token) return false;
-  const exp = sessions.get(token);
-  if (!exp) return false;
-  if (exp < Date.now()) { sessions.delete(token); return false; }
-  return true;
-}
-
 setInterval(() => {
   const now = Date.now();
-  for (const [t, exp] of sessions) if (exp < now) sessions.delete(t);
+  for (const [t, exp] of loggedOut) if (exp < now) loggedOut.delete(t);
   for (const [ip, e] of loginAttempts) if (e.reset < now) loginAttempts.delete(ip);
   for (const [tok, e] of dlStore) {
     if (e.at + DL_TTL_MS < now) {
@@ -729,20 +746,20 @@ const server = http.createServer(async (req, res) => {
       return send(res, 429, { ok: false, error: "too many attempts" });
     }
     if (PASSWORD_HASH && timingSafeEqualHex(sha256Hex(password), PASSWORD_HASH)) {
-      const token = newSession();
+      const token = newSession(clientIp(req));
       return send(res, 200, { ok: true }, { "Set-Cookie": sessionCookie(token, req) });
     }
     return send(res, 401, { ok: false, error: "wrong password" });
   }
 
   if (req.method === "GET" && url.pathname === "/api/me") {
-    const ok = validSession(parseCookies(req).seu_session);
+    const ok = validSession(parseCookies(req).seu_session, clientIp(req));
     return send(res, 200, { ok });
   }
 
   if (req.method === "POST" && url.pathname === "/api/logout") {
     const t = parseCookies(req).seu_session;
-    if (t) sessions.delete(t);
+    if (t && typeof t === "string") loggedOut.set(t, Date.now() + SESSION_TTL_MS);
     res.setHeader("Set-Cookie", sessionCookie(null, req));
     return send(res, 200, { ok: true });
   }
@@ -750,7 +767,7 @@ const server = http.createServer(async (req, res) => {
   // Gated site content: only returned with a valid session.
   // Nothing protected lives in the frontend HTML/JS - inspect shows an empty shell.
   if (req.method === "GET" && url.pathname === "/api/home") {
-    if (!validSession(parseCookies(req).seu_session)) {
+    if (!validSession(parseCookies(req).seu_session, clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     return send(res, 200, homePayload());
@@ -815,7 +832,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && url.pathname === "/api/files") {
-    if (!validSession(parseCookies(req).seu_session)) {
+    if (!validSession(parseCookies(req).seu_session, clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     try {
@@ -829,7 +846,7 @@ const server = http.createServer(async (req, res) => {
 
   // IPA library search (cached upstream AltStore sources). Gated.
   if (req.method === "GET" && url.pathname === "/api/ipas") {
-    if (!validSession(parseCookies(req).seu_session)) {
+    if (!validSession(parseCookies(req).seu_session, clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     const source = url.searchParams.get("source") || "fastsign";
@@ -863,7 +880,7 @@ const server = http.createServer(async (req, res) => {
 
   // Source list with cached app counts. Gated.
   if (req.method === "GET" && url.pathname === "/api/sources") {
-    if (!validSession(parseCookies(req).seu_session)) {
+    if (!validSession(parseCookies(req).seu_session, clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     return send(res, 200, IPA_SOURCES.map(s => ({
@@ -875,7 +892,7 @@ const server = http.createServer(async (req, res) => {
 
   // Recently added across all sources, newest first. Gated.
   if (req.method === "GET" && url.pathname === "/api/recent") {
-    if (!validSession(parseCookies(req).seu_session)) {
+    if (!validSession(parseCookies(req).seu_session, clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     const page = Math.max(0, parseInt(url.searchParams.get("page") || "0", 10) || 0);
@@ -903,7 +920,7 @@ const server = http.createServer(async (req, res) => {
 
   // Featured apps resolved live from the sources. Gated.
   if (req.method === "GET" && url.pathname === "/api/featured") {
-    if (!validSession(parseCookies(req).seu_session)) {
+    if (!validSession(parseCookies(req).seu_session, clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     try {
@@ -928,7 +945,7 @@ const server = http.createServer(async (req, res) => {
 
   // SEU app repository summary (AltStore source). Gated: requires a valid session.
   if (req.method === "GET" && url.pathname === "/api/repo") {
-    if (!validSession(parseCookies(req).seu_session)) {
+    if (!validSession(parseCookies(req).seu_session, clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     try {
@@ -956,7 +973,7 @@ const server = http.createServer(async (req, res) => {
 
   // Cert list proxy (sideloading.net NexCerts). Gated: requires a valid session.
   if (req.method === "GET" && url.pathname === "/api/certs") {
-    if (!validSession(parseCookies(req).seu_session)) {
+    if (!validSession(parseCookies(req).seu_session, clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     const filter = url.searchParams.get("status") || "signed";
@@ -977,7 +994,7 @@ const server = http.createServer(async (req, res) => {
 
   // Signing health: is zsign ready? Gated.
   if (req.method === "GET" && url.pathname === "/api/sign-health") {
-    if (!validSession(parseCookies(req).seu_session)) {
+    if (!validSession(parseCookies(req).seu_session, clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     try {
@@ -994,7 +1011,7 @@ const server = http.createServer(async (req, res) => {
   // Multipart fields: password, bundleId, appName, certSource ("upload" or
   // "sideload:<id>"). Files: ipa (required), p12 + mobileprovision (upload mode).
   if (req.method === "POST" && url.pathname === "/api/sign") {
-    if (!validSession(parseCookies(req).seu_session)) {
+    if (!validSession(parseCookies(req).seu_session, clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "seu-sign-"));
@@ -1102,7 +1119,7 @@ const server = http.createServer(async (req, res) => {
 
   // Gated re-download of a signed IPA (for the Download button).
   if (req.method === "GET" && url.pathname === "/api/signed") {
-    if (!validSession(parseCookies(req).seu_session)) {
+    if (!validSession(parseCookies(req).seu_session, clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     const token = url.searchParams.get("token") || "";
