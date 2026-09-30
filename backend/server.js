@@ -3,6 +3,10 @@
 const http = require("http");
 const https = require("https");
 const crypto = require("crypto");
+const { execFile } = require("child_process");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 
 const PORT = Number(process.env.PORT || 3000);
 const PASSWORD_HASH = (process.env.SEU_PASSWORD_HASH || "").trim().toLowerCase();
@@ -197,6 +201,134 @@ async function getAllFeeds() {
   return feeds;
 }
 
+function runCmd(cmd, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { timeout: 600000, maxBuffer: 2e6, ...opts }, (err, stdout, stderr) => {
+      if (err) { err.stdout = stdout; err.stderr = stderr; return reject(err); }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+function downloadFile(url, dest) {
+  return new Promise((resolve, reject) => {
+    const visit = (u) => {
+      const mod = u.startsWith("https:") ? https : http;
+      const req = mod.get(u, { timeout: 60000 }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          res.resume();
+          return visit(new URL(res.headers.location, u).toString());
+        }
+        if (res.statusCode !== 200) {
+          res.resume();
+          return reject(new Error("download " + res.statusCode));
+        }
+        const out = fs.createWriteStream(dest);
+        res.pipe(out);
+        out.on("finish", () => resolve());
+        out.on("error", reject);
+        res.on("error", reject);
+      });
+      req.on("timeout", () => { req.destroy(); reject(new Error("download timeout")); });
+      req.on("error", reject);
+    };
+    visit(url);
+  });
+}
+
+// zsign binary (static linux build), fetched once per instance into tmp.
+const ZSIGN_URL = "https://github.com/zhlynn/zsign/releases/download/v1.1.2/zsign-linux-musl-static.tar.gz";
+let zsignPath = null, zsignFetching = null;
+
+async function getZsign() {
+  if (zsignPath) return zsignPath;
+  if (zsignFetching) return zsignFetching;
+  zsignFetching = (async () => {
+    const dir = path.join(os.tmpdir(), "seu-zsign");
+    const bin = path.join(dir, "zsign-musl");
+    try { fs.accessSync(bin, fs.constants.X_OK); zsignPath = bin; return bin; }
+    catch { /* download below */ }
+    fs.mkdirSync(dir, { recursive: true });
+    const tgz = path.join(dir, "zsign.tar.gz");
+    await downloadFile(ZSIGN_URL, tgz);
+    await runCmd("tar", ["-xzf", tgz, "-C", dir]);
+    fs.chmodSync(bin, 0o755);
+    try { fs.unlinkSync(tgz); } catch {}
+    zsignPath = bin;
+    return bin;
+  })();
+  try { return await zsignFetching; }
+  finally { zsignFetching = null; }
+}
+
+// Minimal streaming multipart parser: file parts go straight to disk.
+// Buffered multipart parser (body capped during accumulation).
+function parseMultipart(req, saveDir, limits) {
+  return new Promise((resolve, reject) => {
+    const ctype = req.headers["content-type"] || "";
+    const m = ctype.match(/boundary=(?:"([^"]+)"|([^;]+))/)
+    if (!m) return reject(Object.assign(new Error("not multipart"), { status: 400 }));
+    const boundary = Buffer.from("--" + (m[1] || m[2]).trim());
+    const CRLF = Buffer.from("\r\n");
+    const chunks = [];
+    let total = 0;
+    req.on("data", c => {
+      total += c.length;
+      if (total > ((limits && limits.total) || 450e6)) {
+        req.destroy();
+        return reject(Object.assign(new Error("upload too large"), { status: 413 }));
+      }
+      chunks.push(c);
+    });
+    req.on("error", () => reject(Object.assign(new Error("upload error"), { status: 500 })));
+    req.on("end", () => {
+      try {
+        resolve(splitParts(Buffer.concat(chunks), boundary, CRLF, saveDir, limits || {}));
+      } catch (e) {
+        reject(Object.assign(new Error(e.message || "bad upload"), { status: e.status || 400 }));
+      }
+    });
+  });
+}
+
+function splitParts(body, boundary, CRLF, saveDir, limits) {
+  const fields = {};
+  const files = {};
+  let pos = body.indexOf(boundary, 0);
+  if (pos < 0) throw { status: 400, message: "bad upload" };
+  pos += boundary.length;
+  for (;;) {
+    if (pos + 1 >= body.length) throw { status: 400, message: "truncated upload" };
+    if (body[pos] === 45 && body[pos + 1] === 45) break; // closing delimiter
+    pos += 2; // skip CRLF after boundary
+    const hend = body.indexOf("\r\n\r\n", pos);
+    if (hend < 0) throw { status: 400, message: "bad part headers" };
+    const disp = body.slice(pos, hend).toString("utf8")
+      .match(/name="([^"]*)"(?:;\s*filename="([^"]*)")?/);
+    const fieldName = disp ? disp[1] : "";
+    const fileName = disp && disp[2] ? disp[2] : "";
+    pos = hend + 4;
+    const next = body.indexOf(boundary, pos);
+    if (next < 0) throw { status: 400, message: "truncated upload" };
+    let content = body.slice(pos, next);
+    if (content.length >= 2 && content[content.length - 2] === 13 && content[content.length - 1] === 10) {
+      content = content.slice(0, -2);
+    }
+    if (fileName) {
+      const lim = limits[fieldName] || 5e6;
+      if (content.length > lim) throw { status: 413, message: "file too large" };
+      const safe = path.basename(fileName).replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 100) || "upload";
+      const filePath = path.join(saveDir, fieldName + "-" + Date.now() + "-" + safe);
+      fs.writeFileSync(filePath, content);
+      files[fieldName] = { path: filePath, name: fileName, size: content.length };
+    } else {
+      if (content.length > 1e6) throw { status: 400, message: "field too large" };
+      fields[fieldName] = content.toString("utf8");
+    }
+    pos = next + boundary.length;
+  }
+  return { fields, files };
+}
 function fetchBig(url, maxBytes) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, { timeout: 60000 }, (res) => {
@@ -546,6 +678,100 @@ const server = http.createServer(async (req, res) => {
     } catch {
       return send(res, 502, { ok: false, error: "cert provider unreachable" });
     }
+  }
+
+  // Signing health: is zsign ready? Gated.
+  if (req.method === "GET" && url.pathname === "/api/sign-health") {
+    if (!validSession(parseCookies(req).seu_session)) {
+      return send(res, 401, { ok: false, error: "unauthorized" });
+    }
+    try {
+      const bin = await getZsign();
+      const out = await runCmd(bin, []).catch(e => e);
+      const text = ((out.stdout || "") + "\n" + (out.stderr || "")).split("\n").slice(0, 3).join(" ").slice(0, 200);
+      return send(res, 200, { ok: true, zsign: text.trim() || "ready" });
+    } catch (e) {
+      return send(res, 502, { ok: false, error: "signer unavailable" });
+    }
+  }
+
+  // IPA signing (zsign). Gated. Files are temp-only and deleted after.
+  // Multipart fields: password, bundleId, appName, certSource ("upload" or
+  // "sideload:<id>"). Files: ipa (required), p12 + mobileprovision (upload mode).
+  if (req.method === "POST" && url.pathname === "/api/sign") {
+    if (!validSession(parseCookies(req).seu_session)) {
+      return send(res, 401, { ok: false, error: "unauthorized" });
+    }
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "seu-sign-"));
+    const cleanup = () => fs.rm(workDir, { recursive: true, force: true }, () => {});
+    try {
+      const { fields, files } = await parseMultipart(req, workDir, {
+        total: 450e6, ipa: 400e6, p12: 5e6, mobileprovision: 5e6
+      }).catch(e => { throw { status: e.status || 400, message: e.message }; });
+
+      if (!files.ipa || !files.ipa.size) throw { status: 400, message: "ipa file required" };
+      const bundleId = (fields.bundleId || "").trim().slice(0, 120);
+      const appName = (fields.appName || "").trim().slice(0, 120);
+      const certSource = (fields.certSource || "upload").trim();
+
+      let p12Path, provPath, p12Password = "";
+      if (certSource.startsWith("sideload:")) {
+        const certId = certSource.split(":")[1];
+        if (!/^\d+$/.test(certId || "")) throw { status: 400, message: "bad cert choice" };
+        const dl = "https://sideloading.net/api/certificates/download/" + certId;
+        p12Path = path.join(workDir, "cert.p12");
+        provPath = path.join(workDir, "cert.mobileprovision");
+        await downloadFile(dl + "/cert.p12", p12Path).catch(() => {
+          throw { status: 400, message: "chosen cert has no p12 (try another)" };
+        });
+        await downloadFile(dl + "/cert.mobileprovision", provPath).catch(() => {
+          throw { status: 502, message: "could not fetch provision file" };
+        });
+        try {
+          const pw = await fetchUpstream(dl + "/password");
+          p12Password = pw.status === 200 ? pw.body.trim().slice(0, 200) : "";
+        } catch { p12Password = ""; }
+      } else {
+        if (!files.p12 || !files.p12.size) throw { status: 400, message: "p12 file required" };
+        if (!files.mobileprovision || !files.mobileprovision.size) {
+          throw { status: 400, message: "mobileprovision file required" };
+        }
+        p12Path = files.p12.path;
+        provPath = files.mobileprovision.path;
+        p12Password = (fields.password || "").slice(0, 200);
+      }
+
+      const bin = await getZsign().catch(() => {
+        throw { status: 502, message: "signer unavailable, try again" };
+      });
+      const outName = "signed-" + (files.ipa.name || "app.ipa").replace(/\.ipa$/i, "") + ".ipa";
+      const outPath = path.join(workDir, outName);
+      const args = ["-k", p12Path];
+      if (p12Password) args.push("-p", p12Password);
+      args.push("-m", provPath, "-o", outPath, "-z", "9");
+      if (bundleId) args.push("-b", bundleId);
+      if (appName) args.push("-n", appName);
+      args.push(files.ipa.path);
+      try {
+        await runCmd(bin, args);
+      } catch (e) {
+        const detail = String((e.stderr || e.stdout || e.message || "")).split("\n").slice(0, 4).join(" ").slice(0, 300);
+        throw { status: 502, message: "signing failed" + (detail ? ": " + detail : "") };
+      }
+
+      const st = fs.statSync(outPath);
+      res.writeHead(200, {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": st.size,
+        "Content-Disposition": `attachment; filename="${outName.replace(/"/g, "")}"`
+      });
+      fs.createReadStream(outPath).on("close", cleanup).on("error", cleanup).pipe(res);
+    } catch (e) {
+      cleanup();
+      const status = (e && e.status) || 500;
+      return send(res, status, { ok: false, error: (e && e.message) || "sign failed" });
+    }
+    return;
   }
 
   return send(res, 404, { ok: false, error: "not found" });

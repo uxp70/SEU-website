@@ -482,6 +482,48 @@ main h1 {
   outline: none;
 }
 
+.file-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.8rem 0;
+  font-weight: 600;
+}
+
+.file-label input, .file-label select {
+  padding: 0.55rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-soft);
+  color: var(--txt);
+  font-weight: 400;
+}
+
+.primary-btn {
+  padding: 0.7rem 1.6rem;
+  border: 0;
+  border-radius: 12px;
+  background: linear-gradient(90deg, var(--acc), #7c5bff);
+  color: #fff;
+  font-weight: 700;
+  font-size: 1rem;
+  cursor: pointer;
+  margin-top: 0.5rem;
+}
+
+.primary-btn:hover {
+  filter: brightness(1.12);
+}
+
+#sec-signing .card {
+  margin-bottom: 1.1rem;
+}
+
+#sign-result a {
+  color: #9db9ff;
+  font-weight: 700;
+}
+
 .filter-row input[type="search"]:focus {
   border-color: var(--acc);
   box-shadow: 0 0 0 3px var(--acc-soft);

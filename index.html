@@ -32,6 +32,7 @@
         <button data-section="files" type="button">Raw File Storage</button>
         <button data-section="repo" type="button">Repository</button>
         <button data-section="ipas" type="button">IPAs</button>
+        <button data-section="signing" type="button">Signing</button>
       </nav>
       <button id="logout" type="button">Log out</button>
     </aside>
@@ -157,6 +158,38 @@
           <div class="filter-row">
             <button id="recent-more" type="button" hidden>Load more</button>
           </div>
+        </div>
+      </section>
+
+      <section id="sec-signing" hidden>
+        <h1>Signing</h1>
+        <p class="welcome">Sign an IPA with a certificate. Files are processed on the server and deleted afterwards.</p>
+        <div class="card">
+          <h2>1. Certificate</h2>
+          <div class="filter-row">
+            <button data-cert-src="own" class="active" type="button">My files</button>
+            <button data-cert-src="sideloading" type="button">Sideloading.net</button>
+          </div>
+          <div id="cert-own">
+            <label class="file-label">P12 file<input id="sign-p12" type="file" accept=".p12,.pfx" /></label>
+            <label class="file-label">Provision file<input id="sign-prov" type="file" accept=".mobileprovision" /></label>
+            <label class="file-label">P12 password<input id="sign-password" type="password" autocomplete="off" placeholder="Certificate password" /></label>
+          </div>
+          <div id="cert-sideloading" hidden>
+            <label class="file-label">Pick a signed certificate
+              <select id="sign-cert"></select>
+            </label>
+            <p class="cert-meta">Password is fetched automatically and never shown.</p>
+          </div>
+        </div>
+        <div class="card">
+          <h2>2. IPA</h2>
+          <label class="file-label">IPA file<input id="sign-ipa" type="file" accept=".ipa" /></label>
+          <label class="file-label">Bundle ID (optional)<input id="sign-bundle" type="text" placeholder="com.example.app" /></label>
+          <label class="file-label">App name (optional)<input id="sign-appname" type="text" placeholder="My App" /></label>
+          <button id="sign-go" type="button" class="primary-btn">Sign it</button>
+          <p id="sign-status" class="welcome"></p>
+          <p id="sign-result" hidden><a id="sign-download" href="#">Download signed IPA</a></p>
         </div>
       </section>
     </main>
@@ -423,6 +456,94 @@
     }
 
     document.getElementById("recent-more").addEventListener("click", () => { recentPage++; loadRecent(false); });
+
+    let certSrc = "own";
+    let signCertsLoaded = false;
+
+    document.querySelectorAll("[data-cert-src]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("[data-cert-src]").forEach(b => b.classList.toggle("active", b === btn));
+        certSrc = btn.dataset.certSrc;
+        document.getElementById("cert-own").hidden = certSrc !== "own";
+        document.getElementById("cert-sideloading").hidden = certSrc !== "sideloading";
+        if (certSrc === "sideloading") loadSignCerts();
+      });
+    });
+
+    async function loadSignCerts() {
+      if (signCertsLoaded) return;
+      const sel = document.getElementById("sign-cert");
+      sel.innerHTML = "";
+      const loading = document.createElement("option");
+      loading.textContent = "Loading certificates...";
+      sel.append(loading);
+      try {
+        const r = await fetch(API_BASE + "/api/certs?status=signed&amount=100", { credentials: "include", cache: "no-store" });
+        if (!r.ok) throw new Error("http " + r.status);
+        sel.innerHTML = "";
+        for (const c of await r.json()) {
+          const o = document.createElement("option");
+          o.value = c.id;
+          o.textContent = c.nickname || c.name || ("Cert #" + c.id);
+          sel.append(o);
+        }
+        signCertsLoaded = true;
+        if (!sel.options.length) {
+          const o = document.createElement("option");
+          o.textContent = "No signed certs right now";
+          sel.append(o);
+        }
+      } catch {
+        sel.innerHTML = "";
+        const o = document.createElement("option");
+        o.textContent = "Could not load certs";
+        sel.append(o);
+      }
+    }
+
+    document.getElementById("sign-go").addEventListener("click", async () => {
+      const statusEl = document.getElementById("sign-status");
+      const resultEl = document.getElementById("sign-result");
+      resultEl.hidden = true;
+      const ipa = document.getElementById("sign-ipa").files[0];
+      if (!ipa) { statusEl.textContent = "Choose an IPA file first."; return; }
+      const fd = new FormData();
+      fd.append("bundleId", document.getElementById("sign-bundle").value.trim());
+      fd.append("appName", document.getElementById("sign-appname").value.trim());
+      if (certSrc === "sideloading") {
+        const id = document.getElementById("sign-cert").value;
+        if (!id || !/^\d+$/.test(id)) { statusEl.textContent = "Pick a certificate first."; return; }
+        fd.append("certSource", "sideload:" + id);
+      } else {
+        const p12 = document.getElementById("sign-p12").files[0];
+        const prov = document.getElementById("sign-prov").files[0];
+        if (!p12 || !prov) { statusEl.textContent = "Add your p12 and provision files."; return; }
+        fd.append("certSource", "upload");
+        fd.append("password", document.getElementById("sign-password").value);
+        fd.append("p12", p12);
+        fd.append("mobileprovision", prov);
+      }
+      fd.append("ipa", ipa);
+      statusEl.textContent = "Uploading and signing - big IPAs take a few minutes...";
+      try {
+        const r = await fetch(API_BASE + "/api/sign", { method: "POST", credentials: "include", body: fd });
+        if (!r.ok) {
+          let msg = "Signing failed";
+          try { msg = (await r.json()).error || msg; } catch {}
+          statusEl.textContent = msg;
+          return;
+        }
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.getElementById("sign-download");
+        a.href = url;
+        a.download = "signed-" + ipa.name.replace(/\.ipa$/i, "") + ".ipa";
+        resultEl.hidden = false;
+        statusEl.textContent = "Signed! Use the link below (valid for this session).";
+      } catch {
+        statusEl.textContent = "Server unreachable - try again.";
+      }
+    });
 
     // Live file watch: while the Files tab is open, refresh the list so
     // uploads made on the raw file site appear on their own.
