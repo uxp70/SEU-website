@@ -9,6 +9,43 @@ const PASSWORD_HASH = (process.env.SEU_PASSWORD_HASH || "").trim().toLowerCase()
 const SECRET = process.env.SEU_SECRET || "dev-secret-change-me";
 const ORIGINS = (process.env.ALLOWED_ORIGINS || "").split(",").map(s => s.trim()).filter(Boolean);
 
+// Site content lives OUTSIDE the repo (Render env SEU_CONTENT_JSON), so the
+// public repository contains code only - no text, names, or lists to inspect.
+let SITE_CONTENT = null;
+try {
+  const parsed = JSON.parse(process.env.SEU_CONTENT_JSON || "");
+  if (parsed && typeof parsed === "object") SITE_CONTENT = parsed;
+} catch { /* fallback below */ }
+
+const DEFAULT_CONTENT = {
+  title: "SEU website",
+  welcome: "Welcome",
+  cards: [{ title: "Status", text: "Content not configured.", lines: ["Backend: online"] }],
+  projects: [],
+  future: [],
+  links: [],
+  resources: [],
+  featured: []
+};
+
+function siteContent() {
+  return SITE_CONTENT || DEFAULT_CONTENT;
+}
+
+// Login brute-force guard: 15 attempts per 10 minutes per IP.
+const loginAttempts = new Map();
+function loginAllowed(ip) {
+  const now = Date.now();
+  const e = loginAttempts.get(ip);
+  if (!e || e.reset < now) { loginAttempts.set(ip, { count: 1, reset: now + 10 * 60 * 1000 }); return true; }
+  e.count++;
+  return e.count <= 15;
+}
+function clientIp(req) {
+  const fwd = (req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  return fwd || (req.socket && req.socket.remoteAddress) || "unknown";
+}
+
 // In-memory sessions: token -> expiry timestamp. Single-instance only.
 const sessions = new Map();
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -134,8 +171,6 @@ async function getFeed(id) {
   finally { feedFetching[id] = null; }
 }
 
-const FEATURED_NAMES = ["Delta", "DolphiniOS", "PPSSPP", "RetroArch", "UTM SE", "StikDebug", "SideStore", "Scarlet", "Filza"];
-
 function allSourceSearch(q) {
   // Searches every cached feed; uncached feeds are skipped (open a source once to warm it).
   const out = [];
@@ -206,6 +241,7 @@ function validSession(token) {
 setInterval(() => {
   const now = Date.now();
   for (const [t, exp] of sessions) if (exp < now) sessions.delete(t);
+  for (const [ip, e] of loginAttempts) if (e.reset < now) loginAttempts.delete(ip);
 }, 15 * 60 * 1000).unref();
 
 function cors(req, res) {
@@ -239,32 +275,17 @@ function statusLines() {
 }
 
 function homePayload() {
+  const c = siteContent();
   return {
     ok: true,
-    title: "SEU website",
-    welcome: "Welcome to HQ",
-    cards: [
-      { title: "Certificates", text: "Browse and download signing certs.", goto: "certs" },
-      { title: "Raw File Storage", text: "Files you upload, with raw links.", goto: "files" },
-      { title: "Projects", text: "SEU builds and experiments.", goto: "projects" },
-      { title: "Status", text: "Live service health.", lines: statusLines() }
-    ],
-    projects: [
-      { title: "SEU website", text: "This site - password-gated HQ homescreen." },
-      { title: "Project two", text: "Describe your next build here." },
-      { title: "Project three", text: "Describe another build here." }
-    ],
-    future: [
-      { title: "SEU app?", text: "A native SEU companion app. Idea stage - details soon." }
-    ],
-    links: [
-      { title: "GitHub - uxp70", url: "https://github.com/uxp70" },
-      { title: "Site repo", url: "https://github.com/uxp70/SEU-website" }
-    ],
-    resources: [
-      { title: "GitHub Pages docs", url: "https://docs.github.com/en/pages" },
-      { title: "Render docs", url: "https://render.com/docs" }
-    ]
+    title: c.title || "SEU website",
+    welcome: c.welcome || "Welcome",
+    cards: (c.cards && c.cards.length ? c.cards : DEFAULT_CONTENT.cards).map(card =>
+      card.title === "Status" && !card.lines ? { ...card, lines: statusLines() } : card),
+    projects: c.projects || [],
+    future: c.future || [],
+    links: c.links || [],
+    resources: c.resources || []
   };
 }
 
@@ -277,6 +298,9 @@ const server = http.createServer(async (req, res) => {
     let password = "";
     try { password = JSON.parse(await readBody(req)).password || ""; }
     catch { return send(res, 400, { ok: false, error: "bad json" }); }
+    if (!loginAllowed(clientIp(req))) {
+      return send(res, 429, { ok: false, error: "too many attempts" });
+    }
     if (PASSWORD_HASH && timingSafeEqualHex(sha256Hex(password), PASSWORD_HASH)) {
       const token = newSession();
       return send(res, 200, { ok: true }, { "Set-Cookie": sessionCookie(token, req) });
@@ -447,7 +471,10 @@ const server = http.createServer(async (req, res) => {
     try {
       const feeds = await getAllFeeds();
       const out = [];
-      for (const name of FEATURED_NAMES) {
+      const wanted = (siteContent().featured && siteContent().featured.length)
+        ? siteContent().featured
+        : [];
+      for (const name of wanted) {
         const want = name.toLowerCase();
         for (const f of feeds) {
           if (!f) continue;
