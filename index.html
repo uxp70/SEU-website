@@ -176,15 +176,21 @@
             <label class="file-label">P12 password<input id="sign-password" type="password" autocomplete="off" placeholder="Certificate password" /></label>
           </div>
           <div id="cert-sideloading" hidden>
-            <label class="file-label">Pick a signed certificate
-              <select id="sign-cert"></select>
-            </label>
-            <p class="cert-meta">Password is fetched automatically and never shown.</p>
+            <div class="filter-row">
+              <button data-sign-filter="all" class="active" type="button">All</button>
+              <button data-sign-filter="signed" type="button">Signed</button>
+              <button data-sign-filter="revoked" type="button">Revoked</button>
+            </div>
+            <p id="sign-cert-status" class="cert-meta"></p>
+            <div id="sign-cert-list" class="app-list"></div>
+            <p class="cert-meta">Password is fetched automatically and never shown. Revoked certs sign fine but may not install.</p>
           </div>
         </div>
         <div class="card">
           <h2>2. IPA</h2>
           <label class="file-label">IPA file<input id="sign-ipa" type="file" accept=".ipa" /></label>
+          <label class="file-label">App icon (optional, PNG or JPEG)<input id="sign-icon" type="file" accept=".png,.jpg,.jpeg" /></label>
+          <img id="sign-icon-preview" class="icon-preview" alt="Chosen icon preview" hidden />
           <label class="file-label">Bundle ID (optional)<input id="sign-bundle" type="text" placeholder="com.example.app" /></label>
           <label class="file-label">App name (optional)<input id="sign-appname" type="text" placeholder="My App" /></label>
           <button id="sign-go" type="button" class="primary-btn">Sign it</button>
@@ -458,7 +464,8 @@
     document.getElementById("recent-more").addEventListener("click", () => { recentPage++; loadRecent(false); });
 
     let certSrc = "own";
-    let signCertsLoaded = false;
+    let signCertId = null;
+    let signFilter = "all";
 
     document.querySelectorAll("[data-cert-src]").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -470,36 +477,75 @@
       });
     });
 
+    document.querySelectorAll("[data-sign-filter]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("[data-sign-filter]").forEach(b => b.classList.toggle("active", b === btn));
+        signFilter = btn.dataset.signFilter;
+        loadSignCerts();
+      });
+    });
+
+    function certStatusBadge(s) {
+      const span = document.createElement("span");
+      if ((s || "").includes("Signed")) { span.className = "badge badge-ok"; span.textContent = "Signed"; }
+      else if ((s || "").includes("Revoked")) { span.className = "badge badge-bad"; span.textContent = "Revoked"; }
+      else { span.className = "badge"; span.textContent = s || "Unknown"; }
+      return span;
+    }
+
     async function loadSignCerts() {
-      if (signCertsLoaded) return;
-      const sel = document.getElementById("sign-cert");
-      sel.innerHTML = "";
-      const loading = document.createElement("option");
-      loading.textContent = "Loading certificates...";
-      sel.append(loading);
+      const statusEl = document.getElementById("sign-cert-status");
+      const box = document.getElementById("sign-cert-list");
+      statusEl.textContent = "Loading certificates...";
       try {
-        const r = await fetch(API_BASE + "/api/certs?status=signed&amount=100", { credentials: "include", cache: "no-store" });
-        if (!r.ok) throw new Error("http " + r.status);
-        sel.innerHTML = "";
-        for (const c of await r.json()) {
-          const o = document.createElement("option");
-          o.value = c.id;
-          o.textContent = c.nickname || c.name || ("Cert #" + c.id);
-          sel.append(o);
+        const lists = signFilter === "all" ? ["signed", "revoked"] : [signFilter];
+        let all = [];
+        for (const f of lists) {
+          const r = await fetch(API_BASE + "/api/certs?status=" + f + "&amount=100", { credentials: "include", cache: "no-store" });
+          if (r.status === 401) { statusEl.textContent = "Session expired - log in again."; return; }
+          if (!r.ok) throw new Error("http " + r.status);
+          all = all.concat(await r.json());
         }
-        signCertsLoaded = true;
-        if (!sel.options.length) {
-          const o = document.createElement("option");
-          o.textContent = "No signed certs right now";
-          sel.append(o);
+        box.innerHTML = "";
+        signCertId = null;
+        for (const c of all) {
+          const row = document.createElement("div");
+          row.className = "app-row cert-row";
+          const info = document.createElement("div");
+          info.className = "app-info";
+          const name = document.createElement("div");
+          name.className = "app-name";
+          name.textContent = c.nickname || c.name || ("Cert #" + c.id);
+          const meta = document.createElement("div");
+          meta.className = "cert-meta";
+          meta.textContent = "Valid: " + (c.valid_from || "?") + " - " + (c.valid_to || "?");
+          info.append(name, meta, certStatusBadge(c.status));
+          const sel = document.createElement("button");
+          sel.type = "button";
+          sel.className = "get-btn";
+          sel.textContent = "Select";
+          sel.addEventListener("click", () => {
+            signCertId = c.id;
+            box.querySelectorAll(".cert-row").forEach(r2 => r2.classList.remove("selected"));
+            row.classList.add("selected");
+            statusEl.textContent = "Selected: " + (c.nickname || c.name);
+          });
+          row.append(info, sel);
+          box.append(row);
         }
+        statusEl.textContent = all.length ? all.length + " certificates" : "No certificates found.";
       } catch {
-        sel.innerHTML = "";
-        const o = document.createElement("option");
-        o.textContent = "Could not load certs";
-        sel.append(o);
+        statusEl.textContent = "Could not load certs - try again.";
       }
     }
+
+    document.getElementById("sign-icon").addEventListener("change", (e) => {
+      const f = e.target.files[0];
+      const prev = document.getElementById("sign-icon-preview");
+      if (!f) { prev.hidden = true; prev.removeAttribute("src"); return; }
+      prev.src = URL.createObjectURL(f);
+      prev.hidden = false;
+    });
 
     document.getElementById("sign-go").addEventListener("click", async () => {
       const statusEl = document.getElementById("sign-status");
@@ -511,9 +557,8 @@
       fd.append("bundleId", document.getElementById("sign-bundle").value.trim());
       fd.append("appName", document.getElementById("sign-appname").value.trim());
       if (certSrc === "sideloading") {
-        const id = document.getElementById("sign-cert").value;
-        if (!id || !/^\d+$/.test(id)) { statusEl.textContent = "Pick a certificate first."; return; }
-        fd.append("certSource", "sideload:" + id);
+        if (!signCertId) { statusEl.textContent = "Pick a certificate first."; return; }
+        fd.append("certSource", "sideload:" + signCertId);
       } else {
         const p12 = document.getElementById("sign-p12").files[0];
         const prov = document.getElementById("sign-prov").files[0];
@@ -524,6 +569,8 @@
         fd.append("mobileprovision", prov);
       }
       fd.append("ipa", ipa);
+      const icon = document.getElementById("sign-icon").files[0];
+      if (icon) fd.append("icon", icon);
       statusEl.textContent = "Uploading and signing - big IPAs take a few minutes...";
       try {
         const r = await fetch(API_BASE + "/api/sign", { method: "POST", credentials: "include", body: fd });

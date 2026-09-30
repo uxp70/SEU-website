@@ -695,6 +695,27 @@ main h1 {
   color: #fff;
 }
 
+.cert-row.selected {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 2px rgba(56, 225, 198, 0.25);
+}
+
+.cert-row.selected .get-btn {
+  background: var(--cyan);
+  border-color: var(--cyan);
+  color: #06281f;
+}
+
+.icon-preview {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  object-fit: cover;
+  margin-top: 0.5rem;
+  display: block;
+}
+
 /* ---------- Mobile ---------- */
 
 @media (max-width: 640px) {

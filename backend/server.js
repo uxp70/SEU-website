@@ -7,6 +7,7 @@ const { execFile } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const zlib = require("zlib");
 
 const PORT = Number(process.env.PORT || 3000);
 const PASSWORD_HASH = (process.env.SEU_PASSWORD_HASH || "").trim().toLowerCase();
@@ -199,6 +200,132 @@ async function getAllFeeds() {
     catch { feeds.push(null); }
   }
   return feeds;
+}
+
+// Minimal zip surgery (stdlib only): replace an IPA's app icons with new
+// image bytes. Rebuilds local headers + central directory; preserves the
+// entry order. Throws if the file is not a usable zip.
+function crc32(buf) {
+  let table = crc32.table;
+  if (!table) {
+    table = crc32.table = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      table[n] = c >>> 0;
+    }
+  }
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < buf.length; i++) crc = table[(crc ^ buf[i]) & 0xFF] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function parseZipEntries(buf) {
+  // locate end of central directory
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 22 - 65557); i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("not a zip");
+  const count = buf.readUInt16LE(eocd + 10);
+  let off = buf.readUInt32LE(eocd + 16);
+  const entries = [];
+  for (let i = 0; i < count; i++) {
+    if (buf.readUInt32LE(off) !== 0x02014b50) throw new Error("bad central directory");
+    const method = buf.readUInt16LE(off + 10);
+    const crc = buf.readUInt32LE(off + 16);
+    const compSize = buf.readUInt32LE(off + 20);
+    const uncompSize = buf.readUInt32LE(off + 24);
+    const nameLen = buf.readUInt16LE(off + 28);
+    const extraLen = buf.readUInt16LE(off + 30);
+    const commentLen = buf.readUInt16LE(off + 32);
+    const localOff = buf.readUInt32LE(off + 42);
+    const name = buf.slice(off + 46, off + 46 + nameLen).toString("utf8");
+    entries.push({ method, crc, compSize, uncompSize, localOff, name });
+    off += 46 + nameLen + extraLen + commentLen;
+  }
+  return entries;
+}
+
+function replaceZipIcons(ipaPath, iconBytes) {
+  const buf = fs.readFileSync(ipaPath);
+  const entries = parseZipEntries(buf);
+  const targets = entries.filter(e =>
+    /\.app\/([^/]*)(AppIcon|Icon[^/]*)\.png$/i.test(e.name));
+  if (!targets.length) throw new Error("no replaceable app icons found in this IPA");
+  const deflated = zlib.deflateRawSync(iconBytes, { level: 9 });
+  const crc = crc32(iconBytes);
+  const out = [];
+  let pos = 0;
+  const newOffsets = new Map();
+  const nameBuf = (s) => Buffer.from(s, "utf8");
+  for (const e of entries) {
+    const nb = nameBuf(e.name);
+    const isTarget = targets.includes(e);
+    const data = isTarget ? deflated : null;
+    const rawData = isTarget ? null : (() => {
+      const lh = buf.readUInt32LE(e.localOff);
+      if (lh !== 0x04034b50) throw new Error("bad local header");
+      const nl = buf.readUInt16LE(e.localOff + 26);
+      const el = buf.readUInt16LE(e.localOff + 28);
+      const lc = buf.readUInt32LE(e.localOff + 18);
+      const start = e.localOff + 30 + nl + el;
+      return buf.slice(start, start + (lc || e.compSize));
+    })();
+    const payload = isTarget ? data : rawData;
+    const useCrc = isTarget ? crc : e.crc;
+    const useUncomp = isTarget ? iconBytes.length : e.uncompSize;
+    const lh = Buffer.alloc(30 + nb.length);
+    lh.writeUInt32LE(0x04034b50, 0);
+    lh.writeUInt16LE(20, 4);
+    lh.writeUInt16LE(0x0800, 6);
+    lh.writeUInt16LE(isTarget ? 8 : e.method, 8);
+    lh.writeUInt32LE(0, 10);
+    lh.writeUInt32LE(useCrc, 14);
+    lh.writeUInt32LE(payload.length, 18);
+    lh.writeUInt32LE(useUncomp, 22);
+    lh.writeUInt16LE(nb.length, 26);
+    lh.writeUInt16LE(0, 28);
+    nb.copy(lh, 30);
+    newOffsets.set(e, pos);
+    out.push(lh, payload);
+    pos += lh.length + payload.length;
+  }
+  const cdStart = pos;
+  const cdParts = [];
+  for (const e of entries) {
+    const nb = nameBuf(e.name);
+    const isTarget = targets.includes(e);
+    const ch = Buffer.alloc(46 + nb.length);
+    ch.writeUInt32LE(0x02014b50, 0);
+    ch.writeUInt16LE(20, 4);
+    ch.writeUInt16LE(20, 6);
+    ch.writeUInt16LE(0x0800, 8);
+    ch.writeUInt16LE(isTarget ? 8 : e.method, 10);
+    ch.writeUInt32LE(0, 12);
+    ch.writeUInt32LE(isTarget ? crc : e.crc, 16);
+    ch.writeUInt32LE(isTarget ? deflated.length : e.compSize, 20);
+    ch.writeUInt32LE(isTarget ? iconBytes.length : e.uncompSize, 24);
+    ch.writeUInt16LE(nb.length, 28);
+    ch.writeUInt16LE(0, 30);
+    ch.writeUInt16LE(0, 32);
+    ch.writeUInt16LE(0, 34);
+    ch.writeUInt16LE(0, 36);
+    ch.writeUInt32LE(0, 38);
+    ch.writeUInt32LE(newOffsets.get(e), 42);
+    nb.copy(ch, 46);
+    cdParts.push(ch);
+    pos += ch.length;
+  }
+  const cd = Buffer.concat(cdParts);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(cd.length, 12);
+  end.writeUInt32LE(cdStart, 16);
+  fs.writeFileSync(ipaPath, Buffer.concat([...out, cd, end]));
+  return targets.length;
 }
 
 function runCmd(cmd, args, opts = {}) {
@@ -706,10 +833,25 @@ const server = http.createServer(async (req, res) => {
     const cleanup = () => fs.rm(workDir, { recursive: true, force: true }, () => {});
     try {
       const { fields, files } = await parseMultipart(req, workDir, {
-        total: 450e6, ipa: 400e6, p12: 5e6, mobileprovision: 5e6
+        total: 450e6, ipa: 400e6, p12: 5e6, mobileprovision: 5e6, icon: 5e6
       }).catch(e => { throw { status: e.status || 400, message: e.message }; });
 
       if (!files.ipa || !files.ipa.size) throw { status: 400, message: "ipa file required" };
+      let ipaPath = files.ipa.path;
+      if (files.icon && files.icon.size) {
+        const iconBytes = fs.readFileSync(files.icon.path);
+        const isPng = iconBytes.length > 8 && iconBytes[0] === 0x89 && iconBytes[1] === 0x50;
+        const isJpg = iconBytes.length > 3 && iconBytes[0] === 0xFF && iconBytes[1] === 0xD8;
+        if (!isPng && !isJpg) throw { status: 400, message: "icon must be PNG or JPEG" };
+        const modPath = path.join(workDir, "icon-" + files.ipa.name);
+        fs.copyFileSync(ipaPath, modPath);
+        try {
+          replaceZipIcons(modPath, iconBytes);
+        } catch (e) {
+          throw { status: 400, message: "icon replace failed: " + (e.message || "") };
+        }
+        ipaPath = modPath;
+      }
       const bundleId = (fields.bundleId || "").trim().slice(0, 120);
       const appName = (fields.appName || "").trim().slice(0, 120);
       const certSource = (fields.certSource || "upload").trim();
@@ -751,7 +893,7 @@ const server = http.createServer(async (req, res) => {
       args.push("-m", provPath, "-o", outPath, "-z", "9");
       if (bundleId) args.push("-b", bundleId);
       if (appName) args.push("-n", appName);
-      args.push(files.ipa.path);
+      args.push(ipaPath);
       try {
         await runCmd(bin, args);
       } catch (e) {
