@@ -212,6 +212,36 @@ main h1 {
   font-weight: 700;
 }
 
+.filter-row input[type="search"] {
+  flex: 1;
+  min-width: 160px;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.upload-link {
+  padding: 0.5rem 0.8rem;
+  border-radius: 8px;
+  background: #38bdf8;
+  color: #082f49;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.raw-link {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  word-break: break-all;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 0.5rem;
+  color: #bcd0ff;
+}
+
 .badge {
   display: inline-block;
   padding: 0.2rem 0.6rem;

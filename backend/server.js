@@ -79,6 +79,24 @@ function fetchUpstream(url) {
   });
 }
 
+const RFW_OWNER = process.env.RFW_OWNER || "uxp70";
+const RFW_REPO = process.env.RFW_REPO || "raw-file-website";
+const RFW_BRANCH = process.env.RFW_BRANCH || "main";
+
+function fetchGitHub(path) {
+  return new Promise((resolve, reject) => {
+    const headers = { "User-Agent": "seu-backend", "Accept": "application/vnd.github+json" };
+    if (process.env.SEU_GITHUB_TOKEN) headers.Authorization = "Bearer " + process.env.SEU_GITHUB_TOKEN;
+    const req = https.get("https://api.github.com" + path, { timeout: 15000, headers }, (res) => {
+      let data = "";
+      res.on("data", c => { data += c; if (data.length > 5e6) req.destroy(); });
+      res.on("end", () => resolve({ status: res.statusCode || 0, body: data }));
+    });
+    req.on("timeout", () => { req.destroy(); reject(new Error("github timeout")); });
+    req.on("error", reject);
+  });
+}
+
 function validSession(token) {
   if (!token) return false;
   const exp = sessions.get(token);
@@ -164,6 +182,25 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && url.pathname === "/api/health") {
     return send(res, 200, { ok: true });
+  }
+
+  // Raw file storage listing (uxp70/raw-file-website uploads folder). Gated.
+  if (req.method === "GET" && url.pathname === "/api/files") {
+    if (!validSession(parseCookies(req).seu_session)) {
+      return send(res, 401, { ok: false, error: "unauthorized" });
+    }
+    try {
+      const up = await fetchGitHub(`/repos/${RFW_OWNER}/${RFW_REPO}/contents/uploads?ref=${encodeURIComponent(RFW_BRANCH)}`);
+      if (up.status !== 200) return send(res, 502, { ok: false, error: "storage unreachable" });
+      const items = JSON.parse(up.body);
+      const files = (Array.isArray(items) ? items : [])
+        .filter(x => x.type === "file" && !/\.part\d+$/.test(x.name) && x.name !== "files-index.json" && !x.name.endsWith(".manifest.json"))
+        .map(x => ({ name: x.name, size: x.size, raw: x.download_url, path: x.path }));
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify(files));
+    } catch {
+      return send(res, 502, { ok: false, error: "storage unreachable" });
+    }
   }
 
   // Cert list proxy (sideloading.net NexCerts). Gated: requires a valid session.
