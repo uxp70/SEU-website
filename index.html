@@ -29,6 +29,7 @@
         <button data-section="certs" type="button">Certs</button>
         <button data-section="files" type="button">Raw File Storage</button>
         <button data-section="repo" type="button">Repository</button>
+        <button data-section="ipas" type="button">IPAs</button>
       </nav>
       <button id="logout" type="button">Log out</button>
     </aside>
@@ -111,6 +112,20 @@
         <h2 class="subhead">News</h2>
         <div id="repo-news" class="cards"></div>
         <p class="welcome"><a id="repo-github" href="https://github.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang" target="_blank" rel="noopener">Open on GitHub</a></p>
+      </section>
+
+      <section id="sec-ipas" hidden>
+        <h1>IPAs</h1>
+        <p class="welcome">Searchable IPA library - always up to date, no manual uploads.</p>
+        <div class="filter-row">
+          <input id="ipa-search" type="search" placeholder="Search name or bundle ID..." />
+          <button id="ipa-go" type="button">Search</button>
+        </div>
+        <p id="ipa-status" class="welcome"></p>
+        <div id="ipa-list" class="app-list"></div>
+        <div class="filter-row">
+          <button id="ipa-more" type="button" hidden>Load more</button>
+        </div>
       </section>
     </main>
   </div>
@@ -203,6 +218,51 @@
     document.querySelectorAll(".sidebar nav button").forEach(btn => {
       btn.addEventListener("click", () => goSection(btn.dataset.section));
     });
+
+    let ipaQuery = "", ipaPage = 0, ipaTotal = 0;
+    const IPA_LIMIT = 25;
+
+    function appendIpas(apps) {
+      const box = document.getElementById("ipa-list");
+      for (const a of (apps || [])) {
+        box.append(appRow({
+          name: a.name, subtitle: a.subtitle, version: a.version,
+          size: a.size, iconURL: a.iconURL, downloadURL: a.downloadURL
+        }));
+      }
+      document.getElementById("ipa-more").hidden =
+        box.children.length >= ipaTotal || ipaTotal === 0;
+    }
+
+    async function ipaSearch(reset) {
+      const q = document.getElementById("ipa-search").value.trim();
+      const statusEl = document.getElementById("ipa-status");
+      if (q.length < 2) { statusEl.textContent = "Type at least 2 characters."; return; }
+      if (reset) {
+        ipaQuery = q; ipaPage = 0;
+        document.getElementById("ipa-list").innerHTML = "";
+      }
+      statusEl.textContent = "Searching...";
+      try {
+        const r = await fetch(API_BASE + "/api/ipas?q=" + encodeURIComponent(ipaQuery) + "&page=" + ipaPage + "&limit=" + IPA_LIMIT, { credentials: "include", cache: "no-store" });
+        if (r.status === 401) { statusEl.textContent = "Session expired - log in again."; return; }
+        if (!r.ok) throw new Error("http " + r.status);
+        const data = await r.json();
+        ipaTotal = data.total;
+        appendIpas(data.apps);
+        statusEl.textContent = ipaTotal
+          ? "Found " + ipaTotal + " apps (" + data.source + ")"
+          : "No matches - try another search.";
+      } catch {
+        statusEl.textContent = "Search failed - try again.";
+      }
+    }
+
+    document.getElementById("ipa-go").addEventListener("click", () => ipaSearch(true));
+    document.getElementById("ipa-search").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") ipaSearch(true);
+    });
+    document.getElementById("ipa-more").addEventListener("click", () => { ipaPage++; ipaSearch(false); });
 
     // Live file watch: while the Files tab is open, refresh the list so
     // uploads made on the raw file site appear on their own.

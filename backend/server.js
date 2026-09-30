@@ -87,6 +87,49 @@ const SEU_REPO_JSON = "https://raw.githubusercontent.com/DatOneFlareon/The-SEU-a
 const SEU_REPO_URL = "https://github.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang";
 const SEU_REPO_PREVIEW = "https://raw.githubusercontent.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang/main/Ipa%20file/IMG_1508.jpeg";
 
+const IPA_FEED_URL = process.env.IPA_FEED_URL || "https://fastsign.dev/repo.json";
+const IPA_TTL_MS = 30 * 60 * 1000;
+let ipaCache = { at: 0, name: "", apps: [] };
+let ipaFetching = null;
+
+function fetchBig(url, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { timeout: 60000 }, (res) => {
+      let data = "";
+      res.on("data", c => {
+        data += c;
+        if (data.length > maxBytes) { req.destroy(); reject(new Error("feed too large")); }
+      });
+      res.on("end", () => resolve({ status: res.statusCode || 0, body: data }));
+    });
+    req.on("timeout", () => { req.destroy(); reject(new Error("feed timeout")); });
+    req.on("error", reject);
+  });
+}
+
+async function getIpaFeed() {
+  const now = Date.now();
+  if (ipaCache.apps.length && now - ipaCache.at < IPA_TTL_MS) return ipaCache;
+  if (ipaFetching) return ipaFetching;
+  ipaFetching = (async () => {
+    const up = await fetchBig(IPA_FEED_URL, 40e6);
+    if (up.status !== 200) throw new Error("feed error " + up.status);
+    const d = JSON.parse(up.body);
+    ipaCache = {
+      at: Date.now(),
+      name: d.name || "IPA Library",
+      apps: (Array.isArray(d.apps) ? d.apps : []).map(a => ({
+        name: a.name, bundleID: a.bundleIdentifier || a.bundleID,
+        version: a.version, subtitle: a.subtitle, size: a.size,
+        iconURL: a.iconURL || a.icon, downloadURL: a.downloadURL
+      }))
+    };
+    return ipaCache;
+  })();
+  try { return await ipaFetching; }
+  finally { ipaFetching = null; }
+}
+
 function fetchGitHub(path) {
   return new Promise((resolve, reject) => {
     const headers = { "User-Agent": "seu-backend", "Accept": "application/vnd.github+json" };
@@ -224,6 +267,29 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify(files));
     } catch {
       return send(res, 502, { ok: false, error: "storage unreachable" });
+    }
+  }
+
+  // IPA library search (cached upstream AltStore source). Gated.
+  if (req.method === "GET" && url.pathname === "/api/ipas") {
+    if (!validSession(parseCookies(req).seu_session)) {
+      return send(res, 401, { ok: false, error: "unauthorized" });
+    }
+    const q = (url.searchParams.get("q") || "").trim().toLowerCase();
+    if (q.length < 2) return send(res, 400, { ok: false, error: "query too short" });
+    const page = Math.max(0, parseInt(url.searchParams.get("page") || "0", 10) || 0);
+    const limit = Math.min(50, Math.max(1, parseInt(url.searchParams.get("limit") || "25", 10) || 25));
+    try {
+      const feed = await getIpaFeed();
+      const hits = feed.apps.filter(a =>
+        (a.name || "").toLowerCase().includes(q) || (a.bundleID || "").toLowerCase().includes(q));
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({
+        ok: true, source: feed.name, updatedAt: feed.at, total: hits.length, page,
+        apps: hits.slice(page * limit, page * limit + limit)
+      }));
+    } catch {
+      return send(res, 502, { ok: false, error: "ipa feed unreachable" });
     }
   }
 
