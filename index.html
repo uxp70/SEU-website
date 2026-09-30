@@ -9,6 +9,7 @@
 <body>
   <div id="gate">
     <form id="gate-form">
+      <img class="logo logo-gate" src="logo.png" alt="SEU logo" />
       <h1>SEU website</h1>
       <p>Enter password to continue</p>
       <input id="gate-input" type="password" autocomplete="off" placeholder="Password" />
@@ -20,7 +21,7 @@
 
   <div id="site" hidden>
     <aside class="sidebar">
-      <div class="brand">SEU website</div>
+      <button class="brand" id="brand-home" type="button"><img class="logo logo-brand" src="logo.png" alt="SEU logo" /><span>SEU website</span></button>
       <nav>
         <button data-section="home" class="active" type="button">Home</button>
         <button data-section="projects" type="button">Projects</button>
@@ -35,7 +36,11 @@
     </aside>
 
     <main>
+      <div class="topbar">
+        <button id="nav-toggle" type="button" aria-label="Toggle sidebar">&#9776;</button>
+      </div>
       <section id="sec-home">
+        <img class="logo logo-home" src="logo.png" alt="SEU logo" />
         <h1 id="home-title">SEU website</h1>
         <p id="home-welcome" class="welcome"></p>
         <div id="cards" class="cards"></div>
@@ -45,6 +50,8 @@
         <h1>Projects</h1>
         <p class="welcome">Things built at SEU HQ.</p>
         <div id="project-cards" class="cards"></div>
+        <h2 class="subhead">Future projects</h2>
+        <div id="future-cards" class="cards"></div>
       </section>
 
       <section id="sec-links" hidden>
@@ -192,6 +199,16 @@
         const p = document.createElement("p");
         p.textContent = c.text;
         el.append(h, p);
+        if (c.lines && c.lines.length) {
+          const ul = document.createElement("ul");
+          ul.className = "status-lines";
+          for (const ln of c.lines) {
+            const li = document.createElement("li");
+            li.textContent = ln;
+            ul.append(li);
+          }
+          el.append(ul);
+        }
         if (c.goto) {
           el.tabIndex = 0;
           el.setAttribute("role", "button");
@@ -224,6 +241,7 @@
       document.getElementById("home-welcome").textContent = data.welcome || "";
       renderCards("cards", data.cards);
       renderCards("project-cards", data.projects);
+      renderCards("future-cards", data.future);
       renderLinks("link-list", data.links);
       renderLinks("resource-list", data.resources);
       gate.hidden = true;
@@ -242,6 +260,35 @@
 
     document.querySelectorAll(".sidebar nav button").forEach(btn => {
       btn.addEventListener("click", () => goSection(btn.dataset.section));
+    });
+
+    document.getElementById("brand-home").addEventListener("click", () => goSection("home"));
+
+    // Collapsible sidebar, remembered across visits.
+    const navToggle = document.getElementById("nav-toggle");
+    function applyNav() {
+      let closed = false;
+      try { closed = localStorage.getItem("seu-nav") === "closed"; } catch {}
+      document.body.classList.toggle("nav-closed", closed);
+    }
+    navToggle.addEventListener("click", () => {
+      const closed = !document.body.classList.contains("nav-closed");
+      document.body.classList.toggle("nav-closed", closed);
+      try { localStorage.setItem("seu-nav", closed ? "closed" : "open"); } catch {}
+    });
+    applyNav();
+
+    // Logo: local file first, repo-hosted SEU logo as fallback.
+    const SEU_LOGO_FALLBACK = "https://raw.githubusercontent.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang/refs/heads/main/Ipa%20file/Seu%20logo.png";
+    document.querySelectorAll("img.logo").forEach(img => {
+      img.addEventListener("error", () => {
+        if (!img.dataset.fbk && img.src !== SEU_LOGO_FALLBACK) {
+          img.dataset.fbk = "1";
+          img.src = SEU_LOGO_FALLBACK;
+        } else {
+          img.style.display = "none";
+        }
+      });
     });
 
     let ipaQuery = "", ipaPage = 0, ipaTotal = 0;
@@ -269,6 +316,10 @@
     async function loadSources() {
       const sel = document.getElementById("ipa-source");
       if (sel.options.length) return;
+      const all = document.createElement("option");
+      all.value = "all";
+      all.textContent = "All repos";
+      sel.append(all);
       try {
         const r = await fetch(API_BASE + "/api/sources", { credentials: "include", cache: "no-store" });
         if (!r.ok) throw new Error("http " + r.status);

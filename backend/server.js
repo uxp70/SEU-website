@@ -136,6 +136,22 @@ async function getFeed(id) {
 
 const FEATURED_NAMES = ["Delta", "DolphiniOS", "PPSSPP", "RetroArch", "UTM SE", "StikDebug", "SideStore", "Scarlet", "Filza"];
 
+function allSourceSearch(q) {
+  // Searches every cached feed; uncached feeds are skipped (open a source once to warm it).
+  const out = [];
+  for (const s of IPA_SOURCES) {
+    const c = feedCache[s.id];
+    if (!c || !c.apps.length) continue;
+    for (const a of c.apps) {
+      if ((a.name || "").toLowerCase().includes(q) || (a.bundleID || "").toLowerCase().includes(q)) {
+        out.push({ ...a, source: c.name });
+        if (out.length >= 200) return out;
+      }
+    }
+  }
+  return out;
+}
+
 async function getAllFeeds() {
   // Sequential: avoids parsing multiple giant feeds at once on small hosts.
   const feeds = [];
@@ -203,6 +219,55 @@ function cors(req, res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
+function statusLines() {
+  const lines = ["Backend: online"];
+  let total = 0, n = 0;
+  for (const s of IPA_SOURCES) {
+    const c = feedCache[s.id];
+    if (c && c.apps.length) { n++; total += c.apps.length; }
+  }
+  lines.push(n
+    ? `Libraries: ${n}/${IPA_SOURCES.length} loaded (${total.toLocaleString("en-US")} apps indexed)`
+    : "Libraries: warming up - open the IPAs tab");
+  if (filesCache.data.length) {
+    lines.push(`Files: ${filesCache.data.length} stored (${filesCache.data.filter(f => f.big).length} big)`);
+  } else {
+    lines.push("Files: storage connected");
+  }
+  lines.push("Session: 12h, all sections gated");
+  return lines;
+}
+
+function homePayload() {
+  return {
+    ok: true,
+    title: "SEU website",
+    welcome: "Welcome to HQ",
+    cards: [
+      { title: "Certificates", text: "Browse and download signing certs.", goto: "certs" },
+      { title: "Raw File Storage", text: "Files you upload, with raw links.", goto: "files" },
+      { title: "Projects", text: "SEU builds and experiments.", goto: "projects" },
+      { title: "Status", text: "Live service health.", lines: statusLines() }
+    ],
+    projects: [
+      { title: "SEU website", text: "This site - password-gated HQ homescreen." },
+      { title: "Project two", text: "Describe your next build here." },
+      { title: "Project three", text: "Describe another build here." }
+    ],
+    future: [
+      { title: "SEU app?", text: "A native SEU companion app. Idea stage - details soon." }
+    ],
+    links: [
+      { title: "GitHub - uxp70", url: "https://github.com/uxp70" },
+      { title: "Site repo", url: "https://github.com/uxp70/SEU-website" }
+    ],
+    resources: [
+      { title: "GitHub Pages docs", url: "https://docs.github.com/en/pages" },
+      { title: "Render docs", url: "https://render.com/docs" }
+    ]
+  };
+}
+
 const server = http.createServer(async (req, res) => {
   cors(req, res);
   if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
@@ -237,30 +302,7 @@ const server = http.createServer(async (req, res) => {
     if (!validSession(parseCookies(req).seu_session)) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
-    return send(res, 200, {
-      ok: true,
-      title: "SEU website",
-      welcome: "Welcome to HQ",
-      cards: [
-        { title: "Certificates", text: "Browse and download signing certs.", goto: "certs" },
-        { title: "Raw File Storage", text: "Files you upload, with raw links.", goto: "files" },
-        { title: "Projects", text: "SEU builds and experiments.", goto: "projects" },
-        { title: "Status", text: "All systems normal." }
-      ],
-      projects: [
-        { title: "SEU website", text: "This site - password-gated HQ homescreen." },
-        { title: "Project two", text: "Describe your next build here." },
-        { title: "Project three", text: "Describe another build here." }
-      ],
-      links: [
-        { title: "GitHub - uxp70", url: "https://github.com/uxp70" },
-        { title: "Site repo", url: "https://github.com/uxp70/SEU-website" }
-      ],
-      resources: [
-        { title: "GitHub Pages docs", url: "https://docs.github.com/en/pages" },
-        { title: "Render docs", url: "https://render.com/docs" }
-      ]
-    });
+    return send(res, 200, homePayload());
   }
 
   if (req.method === "GET" && url.pathname === "/api/health") {
@@ -334,12 +376,22 @@ const server = http.createServer(async (req, res) => {
     const page = Math.max(0, parseInt(url.searchParams.get("page") || "0", 10) || 0);
     const limit = Math.min(50, Math.max(1, parseInt(url.searchParams.get("limit") || "25", 10) || 25));
     try {
-      const feed = await getFeed(source);
-      const hits = feed.apps.filter(a =>
-        (a.name || "").toLowerCase().includes(q) || (a.bundleID || "").toLowerCase().includes(q));
+      let hits, label;
+      if (source === "all") {
+        if (!IPA_SOURCES.some(s => feedCache[s.id] && feedCache[s.id].apps.length)) {
+          await getAllFeeds();
+        }
+        hits = allSourceSearch(q);
+        label = "All repos";
+      } else {
+        const feed = await getFeed(source);
+        hits = feed.apps.filter(a =>
+          (a.name || "").toLowerCase().includes(q) || (a.bundleID || "").toLowerCase().includes(q));
+        label = feed.name;
+      }
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       return res.end(JSON.stringify({
-        ok: true, source: feed.name, updatedAt: feed.at, total: hits.length, page,
+        ok: true, source: label, updatedAt: Date.now(), total: hits.length, page,
         apps: hits.slice(page * limit, page * limit + limit)
       }));
     } catch {

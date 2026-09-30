@@ -144,12 +144,97 @@ body {
 .brand {
   font-weight: 800;
   font-size: 1.25rem;
-  letter-spacing: -0.01em;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   padding: 0 0.6rem;
+  text-align: left;
+  color: inherit;
+  font-family: inherit;
+}
+
+.brand span {
+  letter-spacing: -0.01em;
   background: linear-gradient(90deg, #fff, #9db9ff);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+}
+
+.logo {
+  object-fit: cover;
+  background: var(--bg-soft);
+}
+
+.logo-gate {
+  width: 88px;
+  height: 88px;
+  border-radius: 24px;
+  margin-bottom: 1rem;
+  border: 1px solid var(--line);
+}
+
+.logo-brand {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.logo-home {
+  width: 76px;
+  height: 76px;
+  border-radius: 20px;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--line);
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 1.25rem;
+}
+
+#nav-toggle {
+  padding: 0.5rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--txt);
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+#nav-toggle:hover {
+  border-color: var(--acc);
+}
+
+body.nav-closed .sidebar {
+  display: none;
+}
+
+.status-lines {
+  list-style: none;
+  padding: 0.75rem 0 0;
+  margin: 0.75rem 0 0;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.status-lines li {
+  font-size: 0.9rem;
+  color: var(--mut);
+}
+
+.status-lines li::before {
+  content: "\25CF  ";
+  color: var(--cyan);
+  font-size: 0.7rem;
 }
 
 .sidebar nav {
