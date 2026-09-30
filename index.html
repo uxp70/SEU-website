@@ -4,13 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SEU website</title>
-  <link id="favicon" rel="icon" type="image/png" href="https://raw.githubusercontent.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang/refs/heads/main/Ipa%20file/Seu%20logo.png" />
+  <link id="favicon" rel="icon" type="image/png" href="favicon.png" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <div id="gate">
     <form id="gate-form">
-      <img class="logo logo-gate" src="logo.png" alt="SEU logo" />
+      <img class="logo logo-gate" src="https://raw.githubusercontent.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang/refs/heads/main/Ipa%20file/Seu%20logo.png" alt="SEU logo" />
       <h1>SEU website</h1>
       <p>Enter password to continue</p>
       <input id="gate-input" type="password" autocomplete="off" placeholder="Password" />
@@ -22,7 +22,7 @@
 
   <div id="site" hidden>
     <aside class="sidebar">
-      <button class="brand" id="brand-home" type="button"><img class="logo logo-brand" src="logo.png" alt="SEU logo" /><span>SEU website</span></button>
+      <button class="brand" id="brand-home" type="button"><img class="logo logo-brand" src="https://raw.githubusercontent.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang/refs/heads/main/Ipa%20file/Seu%20logo.png" alt="SEU logo" /><span>SEU website</span></button>
       <nav>
         <button data-section="home" class="active" type="button">Home</button>
         <button data-section="projects" type="button">Projects</button>
@@ -41,7 +41,7 @@
         <button id="nav-toggle" type="button" aria-label="Toggle sidebar">&#9776;</button>
       </div>
       <section id="sec-home">
-        <img class="logo logo-home" src="logo.png" alt="SEU logo" />
+        <img class="logo logo-home" src="https://raw.githubusercontent.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang/refs/heads/main/Ipa%20file/Seu%20logo.png" alt="SEU logo" />
         <h1 id="home-title">SEU website</h1>
         <p id="home-welcome" class="welcome"></p>
         <div id="cards" class="cards"></div>
@@ -279,24 +279,14 @@
     });
     applyNav();
 
-    // Logo: local file first, repo-hosted SEU logo as fallback.
+    // Logo: repo-hosted SEU logo by default; upgrades to local logo.png if present.
     const SEU_LOGO_FALLBACK = "https://raw.githubusercontent.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang/refs/heads/main/Ipa%20file/Seu%20logo.png";
+    document.querySelectorAll("img.logo").forEach(img => { img.src = SEU_LOGO_FALLBACK; });
     const probe = new Image();
     probe.onload = () => {
-      document.getElementById("favicon").href = "logo.png";
       document.querySelectorAll("img.logo").forEach(img => { img.src = "logo.png"; });
     };
     probe.src = "logo.png";
-    document.querySelectorAll("img.logo").forEach(img => {
-      img.addEventListener("error", () => {
-        if (!img.dataset.fbk && img.src !== SEU_LOGO_FALLBACK) {
-          img.dataset.fbk = "1";
-          img.src = SEU_LOGO_FALLBACK;
-        } else {
-          img.style.display = "none";
-        }
-      });
-    });
 
     let ipaQuery = "", ipaPage = 0, ipaTotal = 0;
     const IPA_LIMIT = 25;
