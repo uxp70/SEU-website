@@ -13,7 +13,7 @@
       <img class="logo logo-gate" src="https://raw.githubusercontent.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang/refs/heads/main/Ipa%20file/Seu%20logo.png" alt="SEU logo" />
       <h1>SEU website</h1>
       <p>Enter password to continue</p>
-      <input id="gate-input" type="password" autocomplete="off" placeholder="Password" />
+      <input id="gate-input" type="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Password" />
       <button type="submit">Enter</button>
       <p id="gate-error" hidden>Wrong password</p>
       <p id="gate-status" hidden></p>
@@ -363,7 +363,7 @@
       all.textContent = "All repos";
       sel.append(all);
       try {
-        const r = await fetch(API_BASE + "/api/sources", { credentials: "include", cache: "no-store" });
+        const r = await api("/api/sources", { credentials: "include", cache: "no-store" });
         if (!r.ok) throw new Error("http " + r.status);
         for (const s of await r.json()) {
           const o = document.createElement("option");
@@ -401,7 +401,7 @@
       }
       statusEl.textContent = "Searching...";
       try {
-        const r = await fetch(API_BASE + "/api/ipas?source=" + encodeURIComponent(ipaSource()) + "&q=" + encodeURIComponent(ipaQuery) + "&page=" + ipaPage + "&limit=" + IPA_LIMIT, { credentials: "include", cache: "no-store" });
+        const r = await api("/api/ipas?source=" + encodeURIComponent(ipaSource()) + "&q=" + encodeURIComponent(ipaQuery) + "&page=" + ipaPage + "&limit=" + IPA_LIMIT, { credentials: "include", cache: "no-store" });
         if (r.status === 401) { statusEl.textContent = "Session expired - log in again."; return; }
         if (!r.ok) throw new Error("http " + r.status);
         const data = await r.json();
@@ -428,7 +428,7 @@
       const statusEl = document.getElementById("featured-status");
       statusEl.textContent = "Loading featured apps...";
       try {
-        const r = await fetch(API_BASE + "/api/featured", { credentials: "include", cache: "no-store" });
+        const r = await api("/api/featured", { credentials: "include", cache: "no-store" });
         if (r.status === 401) { statusEl.textContent = "Session expired - log in again."; return; }
         if (!r.ok) throw new Error("http " + r.status);
         const box = document.getElementById("featured-list");
@@ -452,7 +452,7 @@
       }
       statusEl.textContent = "Loading newest apps...";
       try {
-        const r = await fetch(API_BASE + "/api/recent?page=" + recentPage + "&limit=" + RECENT_LIMIT, { credentials: "include", cache: "no-store" });
+        const r = await api("/api/recent?page=" + recentPage + "&limit=" + RECENT_LIMIT, { credentials: "include", cache: "no-store" });
         if (r.status === 401) { statusEl.textContent = "Session expired - log in again."; return; }
         if (!r.ok) throw new Error("http " + r.status);
         const data = await r.json();
@@ -507,7 +507,7 @@
         const lists = signFilter === "all" ? ["signed", "revoked"] : [signFilter];
         let all = [];
         for (const f of lists) {
-          const r = await fetch(API_BASE + "/api/certs?status=" + f + "&amount=100", { credentials: "include", cache: "no-store" });
+          const r = await api("/api/certs?status=" + f + "&amount=100", { credentials: "include", cache: "no-store" });
           if (r.status === 401) { statusEl.textContent = "Session expired - log in again."; return; }
           if (!r.ok) throw new Error("http " + r.status);
           all = all.concat(await r.json());
@@ -582,7 +582,7 @@
       if (icon) fd.append("icon", icon);
       statusEl.textContent = "Uploading and signing - big IPAs take a few minutes...";
       try {
-        const r = await fetch(API_BASE + "/api/sign", { method: "POST", credentials: "include", body: fd });
+        const r = await api("/api/sign", { method: "POST", credentials: "include", body: fd });
         if (!r.ok) {
           let msg = "Signing failed";
           try { msg = (await r.json()).error || msg; } catch {}
@@ -606,7 +606,7 @@
       const statusEl = document.getElementById("sign-status");
       statusEl.textContent = "Preparing download...";
       try {
-        const r = await fetch(API_BASE + "/api/signed?token=" + lastSignToken, { credentials: "include" });
+        const r = await api("/api/signed?token=" + lastSignToken, { credentials: "include" });
         if (!r.ok) throw new Error("http " + r.status);
         const blob = await r.blob();
         const url = URL.createObjectURL(blob);
@@ -740,7 +740,7 @@
       const statusEl = document.getElementById("repo-status");
       statusEl.textContent = "Loading repository...";
       try {
-        const r = await fetch(API_BASE + "/api/repo", { credentials: "include" });
+        const r = await api("/api/repo", { credentials: "include" });
         if (r.status === 401) { statusEl.textContent = "Session expired - log in again."; return; }
         if (!r.ok) throw new Error("http " + r.status);
         repoCache = await r.json();
@@ -828,7 +828,7 @@
       const statusEl = document.getElementById("file-status");
       statusEl.textContent = "Loading files...";
       try {
-        const r = await fetch(API_BASE + "/api/files", { credentials: "include", cache: "no-store" });
+        const r = await api("/api/files", { credentials: "include", cache: "no-store" });
         if (r.status === 401) { statusEl.textContent = "Session expired - log in again."; return; }
         if (!r.ok) throw new Error("http " + r.status);
         filesCache = await r.json();
@@ -904,7 +904,7 @@
       statusEl.textContent = "Loading certs...";
       try {
         const amount = document.getElementById("cert-amount").value;
-        const r = await fetch(API_BASE + "/api/certs?status=" + certFilter + "&amount=" + amount, { credentials: "include" });
+        const r = await api("/api/certs?status=" + certFilter + "&amount=" + amount, { credentials: "include" });
         if (r.status === 401) { statusEl.textContent = "Session expired - log in again."; return; }
         if (!r.ok) throw new Error("http " + r.status);
         renderCerts(await r.json());
@@ -925,8 +925,22 @@
     document.getElementById("cert-amount").addEventListener("change", () => loadCerts(true));
     document.getElementById("cert-reload").addEventListener("click", () => loadCerts(true));
 
+    // Session token backup: some mobile browsers block cross-site cookies,
+    // so the token also travels in an X-Session header (memory + storage).
+    let sessionToken = null;
+    try { sessionToken = localStorage.getItem("seu-token"); } catch {}
+    function authHeaders() {
+      return sessionToken ? { "X-Session": sessionToken } : {};
+    }
+    function api(path, options) {
+      options = options || {};
+      options.credentials = "include";
+      options.headers = { ...(options.headers || {}), ...authHeaders() };
+      return api(path, options);
+    }
+
     async function fetchJSON(path, options) {
-      const r = await fetch(API_BASE + path, options);
+      const r = await api(path, options);
       if (!r.ok) {
         const err = new Error("http " + r.status);
         err.status = r.status;
@@ -952,26 +966,58 @@
     }
 
     async function backendLogin(password) {
-      await withWakeUpRetries(() => fetch(API_BASE + "/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ password })
-      }).then(r => {
-        if (r.status === 401) throw Object.assign(new Error("wrong password"), { status: 401 });
-        if (!r.ok) throw new Error("http " + r.status);
-      }), "Contacting HQ server...");
-      const home = await fetchJSON("/api/home", { credentials: "include" });
-      showSite(home);
-      try { localStorage.setItem("seu-auth", "1"); } catch {}
+      let loggedIn = false;
+      // Up to 2 login tries: a rotating mobile IP can invalidate the
+      // session between the login call and the next request.
+      for (let attempt = 1; attempt <= 2 && !loggedIn; attempt++) {
+        const data = await withWakeUpRetries(async () => {
+          const r = await api("/api/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ password })
+          });
+          if (r.status === 401) throw Object.assign(new Error("wrong password"), { status: 401 });
+          if (!r.ok) throw new Error("http " + r.status);
+          return r.json();
+        }, "Contacting HQ server...");
+        if (data && data.token) {
+          sessionToken = data.token;
+          try { localStorage.setItem("seu-token", data.token); } catch {}
+        }
+        try {
+          const home = await fetchJSON("/api/home", {});
+          showSite(home);
+          try { localStorage.setItem("seu-auth", "1"); } catch {}
+          loggedIn = true;
+        } catch (e) {
+          if (attempt === 2) {
+            throw Object.assign(new Error("stuck"), { stuck: true });
+          }
+        }
+      }
     }
 
     async function resumeBackend() {
-      const me = await fetchJSON("/api/me", { credentials: "include" });
-      if (!me.ok) return false;
-      const home = await fetchJSON("/api/home", { credentials: "include" });
-      showSite(home);
-      return true;
+      try {
+        const me = await fetchJSON("/api/me", {});
+        if (!me.ok) return false;
+        const home = await fetchJSON("/api/home", {});
+        showSite(home);
+        return true;
+      } catch (e) {
+        if (e && e.status === 401) {
+          try { sessionToken = localStorage.getItem("seu-token"); } catch {}
+          if (!sessionToken) return false;
+          try {
+            const me = await fetchJSON("/api/me", {});
+            if (!me.ok) return false;
+            const home = await fetchJSON("/api/home", {});
+            showSite(home);
+            return true;
+          } catch { return false; }
+        }
+        throw e;
+      }
     }
 
     async function init() {
@@ -1000,7 +1046,11 @@
       } catch (err) {
         setStatus("");
         error.hidden = false;
-        error.textContent = err && err.status === 401 ? "Wrong password" : "Server unreachable - try again";
+        error.textContent = err && err.status === 401
+          ? "Wrong password"
+          : err && err.stuck
+            ? "Password accepted, but this browser won't hold the session. Try Chrome, or turn off 'Prevent Cross-Site Tracking' in Settings."
+            : "Server unreachable - try again";
         input.value = "";
         input.focus();
       }
@@ -1008,8 +1058,9 @@
 
     logoutBtn.addEventListener("click", async () => {
       stopFileWatch();
-      try { await fetch(API_BASE + "/api/logout", { method: "POST", credentials: "include" }); } catch {}
-      try { localStorage.removeItem("seu-auth"); } catch {}
+      try { await api("/api/logout", { method: "POST" }); } catch {}
+      sessionToken = null;
+      try { localStorage.removeItem("seu-auth"); localStorage.removeItem("seu-token"); } catch {}
       site.hidden = true;
       gate.hidden = false;
       input.focus();
