@@ -332,6 +332,60 @@ main h1 {
   color: #fff;
 }
 
+.subnav {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-bottom: 1.25rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.35rem;
+}
+
+.subnav button {
+  border: 0;
+  background: transparent;
+  color: var(--mut);
+  font-weight: 700;
+  font-size: 0.95rem;
+  padding: 0.55rem 1.15rem;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.subnav button:hover {
+  color: var(--txt);
+}
+
+.subnav button.active {
+  background: linear-gradient(90deg, var(--acc), #7c5bff);
+  color: #fff;
+}
+
+.search-row {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.6rem;
+}
+
+.search-row input[type="search"] {
+  font-size: 1rem;
+  padding: 0.65rem 1rem;
+}
+
+#ipa-go {
+  background: linear-gradient(90deg, var(--acc), #7c5bff);
+  border-color: transparent;
+  color: #fff;
+  padding: 0.65rem 1.4rem;
+}
+
+#ipa-go:hover {
+  filter: brightness(1.12);
+}
+
 .filter-row input[type="search"] {
   flex: 1;
   min-width: 160px;

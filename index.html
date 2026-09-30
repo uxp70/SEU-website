@@ -30,8 +30,6 @@
         <button data-section="files" type="button">Raw File Storage</button>
         <button data-section="repo" type="button">Repository</button>
         <button data-section="ipas" type="button">IPAs</button>
-        <button data-section="featured" type="button">Featured</button>
-        <button data-section="recent" type="button">Recently Added</button>
       </nav>
       <button id="logout" type="button">Log out</button>
     </aside>
@@ -119,32 +117,38 @@
       <section id="sec-ipas" hidden>
         <h1>IPAs</h1>
         <p class="welcome">Searchable IPA libraries - always up to date, no manual uploads.</p>
-        <div class="filter-row">
-          <select id="ipa-source"></select>
-          <input id="ipa-search" type="search" placeholder="Search name or bundle ID..." />
-          <button id="ipa-go" type="button">Search</button>
+        <div class="subnav">
+          <button data-ipa-view="search" class="active" type="button">Search</button>
+          <button data-ipa-view="featured" type="button">Featured</button>
+          <button data-ipa-view="recent" type="button">Recently Added</button>
         </div>
-        <p id="ipa-status" class="welcome"></p>
-        <div id="ipa-list" class="app-list"></div>
-        <div class="filter-row">
-          <button id="ipa-more" type="button" hidden>Load more</button>
+
+        <div id="view-search">
+          <div class="filter-row search-row">
+            <select id="ipa-source"></select>
+            <input id="ipa-search" type="search" placeholder="Search name or bundle ID..." />
+            <button id="ipa-go" type="button">Search</button>
+          </div>
+          <p id="ipa-status" class="welcome"></p>
+          <div id="ipa-list" class="app-list"></div>
+          <div class="filter-row">
+            <button id="ipa-more" type="button" hidden>Load more</button>
+          </div>
         </div>
-      </section>
 
-      <section id="sec-featured" hidden>
-        <h1>Featured</h1>
-        <p class="welcome">Hand-picked essentials, resolved live from the libraries.</p>
-        <p id="featured-status" class="welcome"></p>
-        <div id="featured-list" class="app-list"></div>
-      </section>
+        <div id="view-featured" hidden>
+          <p class="welcome">Hand-picked essentials, resolved live from the libraries.</p>
+          <p id="featured-status" class="welcome"></p>
+          <div id="featured-list" class="app-list"></div>
+        </div>
 
-      <section id="sec-recent" hidden>
-        <h1>Recently Added</h1>
-        <p class="welcome">Newest app updates across all libraries.</p>
-        <p id="recent-status" class="welcome"></p>
-        <div id="recent-list" class="app-list"></div>
-        <div class="filter-row">
-          <button id="recent-more" type="button" hidden>Load more</button>
+        <div id="view-recent" hidden>
+          <p class="welcome">Newest app updates across all libraries.</p>
+          <p id="recent-status" class="welcome"></p>
+          <div id="recent-list" class="app-list"></div>
+          <div class="filter-row">
+            <button id="recent-more" type="button" hidden>Load more</button>
+          </div>
         </div>
       </section>
     </main>
@@ -174,9 +178,7 @@
       if (name === "files") { loadFiles(false); startFileWatch(); }
       else stopFileWatch();
       if (name === "repo") loadRepo(false);
-      if (name === "ipas") loadSources();
-      if (name === "featured") loadFeatured();
-      if (name === "recent" && !document.getElementById("recent-list").children.length) loadRecent(true);
+      if (name === "ipas") { loadSources(); ipaView("search"); }
     }
 
     function renderCards(boxId, items) {
@@ -244,6 +246,21 @@
 
     let ipaQuery = "", ipaPage = 0, ipaTotal = 0;
     const IPA_LIMIT = 25;
+
+    function ipaView(name) {
+      for (const btn of document.querySelectorAll("[data-ipa-view]")) {
+        btn.classList.toggle("active", btn.dataset.ipaView === name);
+      }
+      for (const v of ["search", "featured", "recent"]) {
+        document.getElementById("view-" + v).hidden = v !== name;
+      }
+      if (name === "featured") loadFeatured();
+      if (name === "recent" && !document.getElementById("recent-list").children.length) loadRecent(true);
+    }
+
+    document.querySelectorAll("[data-ipa-view]").forEach(btn => {
+      btn.addEventListener("click", () => ipaView(btn.dataset.ipaView));
+    });
 
     function ipaSource() {
       return document.getElementById("ipa-source").value || "fastsign";
