@@ -83,6 +83,10 @@ const RFW_OWNER = process.env.RFW_OWNER || "uxp70";
 const RFW_REPO = process.env.RFW_REPO || "raw-file-website";
 const RFW_BRANCH = process.env.RFW_BRANCH || "main";
 
+const SEU_REPO_JSON = "https://raw.githubusercontent.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang/main/SEU.json";
+const SEU_REPO_URL = "https://github.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang";
+const SEU_REPO_PREVIEW = "https://raw.githubusercontent.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang/main/Ipa%20file/IMG_1508.jpeg";
+
 function fetchGitHub(path) {
   return new Promise((resolve, reject) => {
     const headers = { "User-Agent": "seu-backend", "Accept": "application/vnd.github+json" };
@@ -201,6 +205,34 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify(files));
     } catch {
       return send(res, 502, { ok: false, error: "storage unreachable" });
+    }
+  }
+
+  // SEU app repository summary (AltStore source). Gated: requires a valid session.
+  if (req.method === "GET" && url.pathname === "/api/repo") {
+    if (!validSession(parseCookies(req).seu_session)) {
+      return send(res, 401, { ok: false, error: "unauthorized" });
+    }
+    try {
+      const up = await fetchUpstream(SEU_REPO_JSON);
+      if (up.status !== 200) return send(res, 502, { ok: false, error: "repo unreachable" });
+      const src = JSON.parse(up.body);
+      const apps = (Array.isArray(src.apps) ? src.apps : []).map(a => ({
+        name: a.name, subtitle: a.subtitle, version: a.version,
+        iconURL: a.iconURL, size: a.size, downloadURL: a.downloadURL
+      }));
+      const news = (Array.isArray(src.news) ? src.news : []).map(n => ({
+        title: n.title, caption: n.caption, date: n.date, url: n.url, imageURL: n.imageURL
+      }));
+      return send(res, 200, {
+        ok: true,
+        name: src.name, description: src.description, subtitle: src.subtitle,
+        iconURL: src.iconURL, tintColor: src.tintColor,
+        repoUrl: SEU_REPO_URL, rawJsonUrl: SEU_REPO_JSON, previewImage: SEU_REPO_PREVIEW,
+        appCount: apps.length, apps, news
+      });
+    } catch {
+      return send(res, 502, { ok: false, error: "repo unreachable" });
     }
   }
 

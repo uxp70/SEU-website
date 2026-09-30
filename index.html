@@ -28,6 +28,7 @@
         <button data-section="resources" type="button">Resources</button>
         <button data-section="certs" type="button">Certs</button>
         <button data-section="files" type="button">Raw File Storage</button>
+        <button data-section="repo" type="button">Repository</button>
       </nav>
       <button id="logout" type="button">Log out</button>
     </aside>
@@ -87,6 +88,29 @@
         </div>
         <p id="file-status" class="welcome"></p>
         <div id="file-list" class="cards"></div>
+      </section>
+
+      <section id="sec-repo" hidden>
+        <h1>Repository</h1>
+        <p class="welcome">The official SEU app source. Add it to your signer with the raw JSON link below.</p>
+        <div class="card repo-head">
+          <img id="repo-icon" class="repo-icon" alt="SEU repository icon" loading="lazy" />
+          <div>
+            <h2 id="repo-name">SEU repository</h2>
+            <p id="repo-desc" class="cert-meta"></p>
+            <p id="repo-count" class="cert-meta"></p>
+          </div>
+        </div>
+        <h2 class="subhead">Source JSON</h2>
+        <p class="welcome">Click the link to copy it, then paste it as a source in your signer.</p>
+        <p id="repo-json" class="raw-link copy-box" role="button" tabindex="0" title="Click to copy"></p>
+        <img id="repo-preview" class="repo-preview" alt="Repository preview" loading="lazy" />
+        <h2 class="subhead">Apps</h2>
+        <p id="repo-status" class="welcome"></p>
+        <div id="repo-apps" class="app-list"></div>
+        <h2 class="subhead">News</h2>
+        <div id="repo-news" class="cards"></div>
+        <p class="welcome"><a id="repo-github" href="https://github.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang" target="_blank" rel="noopener">Open on GitHub</a></p>
       </section>
     </main>
   </div>
@@ -179,8 +203,116 @@
         showSection(btn.dataset.section);
         if (btn.dataset.section === "certs") loadCerts(false);
         if (btn.dataset.section === "files") loadFiles(false);
+        if (btn.dataset.section === "repo") loadRepo(false);
       });
     });
+
+    let repoCache = null;
+
+    function appRow(a) {
+      const row = document.createElement("div");
+      row.className = "app-row";
+      if (a.iconURL) {
+        const img = document.createElement("img");
+        img.className = "app-icon";
+        img.src = a.iconURL;
+        img.alt = "";
+        img.loading = "lazy";
+        img.addEventListener("error", () => img.remove());
+        row.append(img);
+      }
+      const info = document.createElement("div");
+      info.className = "app-info";
+      const name = document.createElement("div");
+      name.className = "app-name";
+      name.textContent = a.name || "Unnamed app";
+      const sub = document.createElement("div");
+      sub.className = "cert-meta";
+      sub.textContent = [a.subtitle, a.version, a.size ? fmtSize(a.size) : ""].filter(Boolean).join(" - ");
+      info.append(name, sub);
+      row.append(info);
+      if (a.downloadURL) {
+        const get = document.createElement("a");
+        get.className = "get-btn";
+        get.textContent = "Get";
+        get.href = a.downloadURL;
+        get.rel = "noopener";
+        row.append(get);
+      }
+      return row;
+    }
+
+    function renderRepo(data) {
+      document.getElementById("repo-name").textContent = data.name || "SEU repository";
+      document.getElementById("repo-desc").textContent = data.description || "";
+      document.getElementById("repo-count").textContent = data.appCount + " apps";
+      const icon = document.getElementById("repo-icon");
+      if (data.iconURL) { icon.src = data.iconURL; icon.hidden = false; }
+      else icon.hidden = true;
+      const preview = document.getElementById("repo-preview");
+      if (data.previewImage) { preview.src = data.previewImage; preview.hidden = false; }
+      else preview.hidden = true;
+      const jsonBox = document.getElementById("repo-json");
+      jsonBox.textContent = data.rawJsonUrl;
+      const apps = document.getElementById("repo-apps");
+      apps.innerHTML = "";
+      for (const a of (data.apps || [])) apps.append(appRow(a));
+      const news = document.getElementById("repo-news");
+      news.innerHTML = "";
+      for (const n of (data.news || [])) {
+        const el = document.createElement("article");
+        el.className = "card";
+        const h = document.createElement("h2");
+        h.textContent = n.title;
+        const p = document.createElement("p");
+        p.textContent = n.caption || "";
+        el.append(h, p);
+        if (n.url) {
+          const a = document.createElement("a");
+          a.textContent = "Open";
+          a.href = n.url;
+          a.target = "_blank";
+          a.rel = "noopener";
+          const row = document.createElement("p");
+          row.className = "dl-row";
+          row.append(a);
+          el.append(row);
+        }
+        news.append(el);
+      }
+    }
+
+    function bindCopyBox() {
+      const box = document.getElementById("repo-json");
+      const copy = async () => {
+        if (!box.textContent) return;
+        await copyText(box.textContent);
+        box.classList.add("copied");
+        setTimeout(() => box.classList.remove("copied"), 1200);
+      };
+      box.addEventListener("click", copy);
+      box.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); copy(); }
+      });
+    }
+
+    async function loadRepo(force) {
+      if (!force && repoCache) { renderRepo(repoCache); return; }
+      const statusEl = document.getElementById("repo-status");
+      statusEl.textContent = "Loading repository...";
+      try {
+        const r = await fetch(API_BASE + "/api/repo", { credentials: "include" });
+        if (r.status === 401) { statusEl.textContent = "Session expired - log in again."; return; }
+        if (!r.ok) throw new Error("http " + r.status);
+        repoCache = await r.json();
+        statusEl.textContent = "";
+        renderRepo(repoCache);
+      } catch {
+        statusEl.textContent = "Could not load repository - try again.";
+      }
+    }
+
+    bindCopyBox();
 
     function fmtSize(n) {
       if (n == null) return "";
