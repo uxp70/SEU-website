@@ -80,7 +80,7 @@
 
       <section id="sec-files" hidden>
         <h1>Raw File Storage</h1>
-        <p class="welcome">Upload files at the <a href="https://uxp70.github.io/raw-file-website/" target="_blank" rel="noopener">raw file site</a> - they show up here with raw links.</p>
+        <p class="welcome">Upload files at the <a href="https://uxp70.github.io/raw-file-website/" target="_blank" rel="noopener">raw file site</a> - they show up here automatically (the list refreshes itself).</p>
         <div class="filter-row">
           <input id="file-search" type="search" placeholder="Search files..." />
           <button id="file-reload" type="button">Reload</button>
@@ -136,7 +136,9 @@
     function goSection(name) {
       showSection(name);
       if (name === "certs") loadCerts(false);
-      if (name === "files") loadFiles(false);
+      if (name === "files") { loadFiles(false); startFileWatch(); }
+      else stopFileWatch();
+      if (name === "repo") loadRepo(false);
     }
 
     function renderCards(boxId, items) {
@@ -199,12 +201,30 @@
     }
 
     document.querySelectorAll(".sidebar nav button").forEach(btn => {
-      btn.addEventListener("click", () => {
-        showSection(btn.dataset.section);
-        if (btn.dataset.section === "certs") loadCerts(false);
-        if (btn.dataset.section === "files") loadFiles(false);
-        if (btn.dataset.section === "repo") loadRepo(false);
-      });
+      btn.addEventListener("click", () => goSection(btn.dataset.section));
+    });
+
+    // Live file watch: while the Files tab is open, refresh the list so
+    // uploads made on the raw file site appear on their own.
+    let fileWatchTimer = null;
+
+    function filesTabVisible() {
+      return !site.hidden && !document.getElementById("sec-files").hidden;
+    }
+
+    function startFileWatch() {
+      stopFileWatch();
+      fileWatchTimer = setInterval(() => {
+        if (filesTabVisible() && !document.hidden) loadFiles(true);
+      }, 15000);
+    }
+
+    function stopFileWatch() {
+      if (fileWatchTimer) { clearInterval(fileWatchTimer); fileWatchTimer = null; }
+    }
+
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden && filesTabVisible()) loadFiles(true);
     });
 
     let repoCache = null;
@@ -381,7 +401,7 @@
       const statusEl = document.getElementById("file-status");
       statusEl.textContent = "Loading files...";
       try {
-        const r = await fetch(API_BASE + "/api/files", { credentials: "include" });
+        const r = await fetch(API_BASE + "/api/files", { credentials: "include", cache: "no-store" });
         if (r.status === 401) { statusEl.textContent = "Session expired - log in again."; return; }
         if (!r.ok) throw new Error("http " + r.status);
         filesCache = await r.json();
@@ -560,6 +580,7 @@
     });
 
     logoutBtn.addEventListener("click", async () => {
+      stopFileWatch();
       try { await fetch(API_BASE + "/api/logout", { method: "POST", credentials: "include" }); } catch {}
       try { localStorage.removeItem("seu-auth"); } catch {}
       site.hidden = true;

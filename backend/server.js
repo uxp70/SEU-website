@@ -201,7 +201,7 @@ const server = http.createServer(async (req, res) => {
       const files = (Array.isArray(items) ? items : [])
         .filter(x => x.type === "file" && !/\.part\d+$/.test(x.name) && x.name !== "files-index.json" && !x.name.endsWith(".manifest.json"))
         .map(x => ({ name: x.name, size: x.size, raw: x.download_url, path: x.path }));
-      res.writeHead(200, { "Content-Type": "application/json" });
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       return res.end(JSON.stringify(files));
     } catch {
       return send(res, 502, { ok: false, error: "storage unreachable" });
