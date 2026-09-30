@@ -82,6 +82,10 @@ function fetchUpstream(url) {
 const RFW_OWNER = process.env.RFW_OWNER || "uxp70";
 const RFW_REPO = process.env.RFW_REPO || "raw-file-website";
 const RFW_BRANCH = process.env.RFW_BRANCH || "main";
+const FILES_TTL_MS = 60 * 1000;
+const FILES_STALE_MS = 10 * 60 * 1000;
+let filesCache = { at: 0, data: [] };
+let filesFetching = null;
 
 const SEU_REPO_JSON = "https://raw.githubusercontent.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang/main/SEU.json";
 const SEU_REPO_URL = "https://github.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang";
@@ -233,16 +237,17 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Raw file storage listing (uxp70/raw-file-website uploads folder). Gated.
-  if (req.method === "GET" && url.pathname === "/api/files") {
-    if (!validSession(parseCookies(req).seu_session)) {
-      return send(res, 401, { ok: false, error: "unauthorized" });
-    }
-    try {
+  // Cached server-side: GitHub's anonymous API allows 60 req/hr per IP and
+  // Render shares egress IPs, so never hit GitHub more than once a minute.
+  async function getFiles() {
+    const now = Date.now();
+    if (filesCache.data.length && now - filesCache.at < FILES_TTL_MS) return filesCache.data;
+    if (filesFetching) return filesFetching;
+    filesFetching = (async () => {
       const up = await fetchGitHub(`/repos/${RFW_OWNER}/${RFW_REPO}/contents/uploads?ref=${encodeURIComponent(RFW_BRANCH)}`);
-      if (up.status !== 200) return send(res, 502, { ok: false, error: "storage unreachable" });
+      if (up.status !== 200) throw new Error("github " + up.status);
       const items = JSON.parse(up.body);
       const list = Array.isArray(items) ? items : [];
-      // Big-file index: manifest path -> { url } release-asset link.
       let index = {};
       try {
         const ix = await fetchUpstream(`https://raw.githubusercontent.com/${RFW_OWNER}/${RFW_REPO}/${RFW_BRANCH}/uploads/files-index.json?ts=${Date.now()}`);
@@ -263,6 +268,23 @@ const server = http.createServer(async (req, res) => {
           files.push({ name: x.name, size: x.size, raw: x.download_url, path: x.path });
         }
       }
+      filesCache = { at: Date.now(), data: files };
+      return files;
+    })();
+    try { return await filesFetching; }
+    catch (e) {
+      if (filesCache.data.length && Date.now() - filesCache.at < FILES_STALE_MS) return filesCache.data;
+      throw e;
+    }
+    finally { filesFetching = null; }
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/files") {
+    if (!validSession(parseCookies(req).seu_session)) {
+      return send(res, 401, { ok: false, error: "unauthorized" });
+    }
+    try {
+      const files = await getFiles();
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       return res.end(JSON.stringify(files));
     } catch {
