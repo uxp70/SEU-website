@@ -134,10 +134,13 @@ function sessionCookie(token, req) {
 
 // Session token: X-Session header first (works even when the browser
 // blocks cross-site cookies, e.g. iOS Safari tracking prevention),
-// cookie second. Same token format either way.
-function authToken(req) {
+// ?s= query second (for networks that kill CORS preflights - the header
+// triggers one, a plain GET does not), cookie last.
+function authToken(req, url) {
   const h = (req.headers["x-session"] || "").trim();
   if (/^[a-f0-9]+\.[a-f0-9]{64}$/.test(h)) return h;
+  const q = (url && url.searchParams.get("s")) || "";
+  if (/^[a-f0-9]+\.[a-f0-9]{64}$/.test(q)) return q;
   return parseCookies(req).seu_session;
 }
 
@@ -760,12 +763,12 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && url.pathname === "/api/me") {
-    const ok = validSession(authToken(req), clientIp(req));
+    const ok = validSession(authToken(req, url), clientIp(req));
     return send(res, 200, { ok });
   }
 
   if (req.method === "POST" && url.pathname === "/api/logout") {
-    const t = authToken(req);
+    const t = authToken(req, url);
     if (t && typeof t === "string") loggedOut.set(t, Date.now() + SESSION_TTL_MS);
     res.setHeader("Set-Cookie", sessionCookie(null, req));
     return send(res, 200, { ok: true });
@@ -774,7 +777,7 @@ const server = http.createServer(async (req, res) => {
   // Gated site content: only returned with a valid session.
   // Nothing protected lives in the frontend HTML/JS - inspect shows an empty shell.
   if (req.method === "GET" && url.pathname === "/api/home") {
-    if (!validSession(authToken(req), clientIp(req))) {
+    if (!validSession(authToken(req, url), clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     return send(res, 200, homePayload());
@@ -839,7 +842,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && url.pathname === "/api/files") {
-    if (!validSession(authToken(req), clientIp(req))) {
+    if (!validSession(authToken(req, url), clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     try {
@@ -853,7 +856,7 @@ const server = http.createServer(async (req, res) => {
 
   // IPA library search (cached upstream AltStore sources). Gated.
   if (req.method === "GET" && url.pathname === "/api/ipas") {
-    if (!validSession(authToken(req), clientIp(req))) {
+    if (!validSession(authToken(req, url), clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     const source = url.searchParams.get("source") || "fastsign";
@@ -887,7 +890,7 @@ const server = http.createServer(async (req, res) => {
 
   // Source list with cached app counts. Gated.
   if (req.method === "GET" && url.pathname === "/api/sources") {
-    if (!validSession(authToken(req), clientIp(req))) {
+    if (!validSession(authToken(req, url), clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     return send(res, 200, IPA_SOURCES.map(s => ({
@@ -899,7 +902,7 @@ const server = http.createServer(async (req, res) => {
 
   // Recently added across all sources, newest first. Gated.
   if (req.method === "GET" && url.pathname === "/api/recent") {
-    if (!validSession(authToken(req), clientIp(req))) {
+    if (!validSession(authToken(req, url), clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     const page = Math.max(0, parseInt(url.searchParams.get("page") || "0", 10) || 0);
@@ -927,7 +930,7 @@ const server = http.createServer(async (req, res) => {
 
   // Featured apps resolved live from the sources. Gated.
   if (req.method === "GET" && url.pathname === "/api/featured") {
-    if (!validSession(authToken(req), clientIp(req))) {
+    if (!validSession(authToken(req, url), clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     try {
@@ -952,7 +955,7 @@ const server = http.createServer(async (req, res) => {
 
   // SEU app repository summary (AltStore source). Gated: requires a valid session.
   if (req.method === "GET" && url.pathname === "/api/repo") {
-    if (!validSession(authToken(req), clientIp(req))) {
+    if (!validSession(authToken(req, url), clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     try {
@@ -980,7 +983,7 @@ const server = http.createServer(async (req, res) => {
 
   // Cert list proxy (sideloading.net NexCerts). Gated: requires a valid session.
   if (req.method === "GET" && url.pathname === "/api/certs") {
-    if (!validSession(authToken(req), clientIp(req))) {
+    if (!validSession(authToken(req, url), clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     const filter = url.searchParams.get("status") || "signed";
@@ -1001,7 +1004,7 @@ const server = http.createServer(async (req, res) => {
 
   // Signing health: is zsign ready? Gated.
   if (req.method === "GET" && url.pathname === "/api/sign-health") {
-    if (!validSession(authToken(req), clientIp(req))) {
+    if (!validSession(authToken(req, url), clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     try {
@@ -1018,7 +1021,7 @@ const server = http.createServer(async (req, res) => {
   // Multipart fields: password, bundleId, appName, certSource ("upload" or
   // "sideload:<id>"). Files: ipa (required), p12 + mobileprovision (upload mode).
   if (req.method === "POST" && url.pathname === "/api/sign") {
-    if (!validSession(authToken(req), clientIp(req))) {
+    if (!validSession(authToken(req, url), clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "seu-sign-"));
@@ -1126,7 +1129,7 @@ const server = http.createServer(async (req, res) => {
 
   // Gated re-download of a signed IPA (for the Download button).
   if (req.method === "GET" && url.pathname === "/api/signed") {
-    if (!validSession(authToken(req), clientIp(req))) {
+    if (!validSession(authToken(req, url), clientIp(req))) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
     const token = url.searchParams.get("token") || "";

@@ -929,8 +929,16 @@
     // so the token also travels in an X-Session header (memory + storage).
     let sessionToken = null;
     try { sessionToken = localStorage.getItem("seu-token"); } catch {}
+    // simpleMode: some phones kill CORS preflights, so the token rides in
+    // ?s= on plain requests instead of the X-Session header.
+    let simpleMode = false;
+    try { simpleMode = localStorage.getItem("seu-simple") === "1"; } catch {}
     function authHeaders() {
-      return sessionToken ? { "X-Session": sessionToken } : {};
+      return !simpleMode && sessionToken ? { "X-Session": sessionToken } : {};
+    }
+    function withToken(path) {
+      if (!simpleMode || !sessionToken) return path;
+      return path + (path.includes("?") ? "&" : "?") + "s=" + encodeURIComponent(sessionToken);
     }
     function api(path, options) {
       options = options || {};
@@ -945,7 +953,7 @@
         setTimeout(() => ctrl.abort(), ms);
       }
       delete options.timeout;
-      return fetch(API_BASE + path, options);
+      return fetch(API_BASE + withToken(path), options);
     }
 
     async function fetchJSON(path, options) {
@@ -1021,11 +1029,11 @@
         const data = await withWakeUpRetries(async () => {
           const r = await api("/api/login", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { "Content-Type": "text/plain;charset=UTF-8" },
             body: JSON.stringify({ password })
           });
           if (r.status === 401) throw Object.assign(new Error("wrong password"), { status: 401 });
-          if (!r.ok) throw new Error("http " + r.status);
+          if (!r.ok) throw Object.assign(new Error("http " + r.status), { status: r.status });
           return r.json();
         }, "Contacting HQ server...");
         if (data && data.token) {
@@ -1038,6 +1046,23 @@
           try { localStorage.setItem("seu-auth", "1"); } catch {}
           loggedIn = true;
         } catch (e) {
+          // Header-authed request died on the network (but login worked):
+          // this browser likely kills CORS preflights - switch to plain
+          // query-param auth and retry once.
+          if (!e.status && !simpleMode && sessionToken) {
+            simpleMode = true;
+            try { localStorage.setItem("seu-simple", "1"); } catch {}
+            try {
+              const home = await fetchJSON("/api/home", {});
+              showSite(home);
+              try { localStorage.setItem("seu-auth", "1"); } catch {}
+              loggedIn = true;
+              continue;
+            } catch (e2) {
+              if (attempt === 2) throw Object.assign(new Error("stuck"), { stuck: true });
+              continue;
+            }
+          }
           if (attempt === 2) {
             throw Object.assign(new Error("stuck"), { stuck: true });
           }
@@ -1117,7 +1142,8 @@
       stopFileWatch();
       try { await api("/api/logout", { method: "POST" }); } catch {}
       sessionToken = null;
-      try { localStorage.removeItem("seu-auth"); localStorage.removeItem("seu-token"); } catch {}
+      simpleMode = false;
+      try { localStorage.removeItem("seu-auth"); localStorage.removeItem("seu-token"); localStorage.removeItem("seu-simple"); } catch {}
       site.hidden = true;
       gate.hidden = false;
       input.focus();
