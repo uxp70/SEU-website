@@ -14,6 +14,7 @@
       <input id="gate-input" type="password" autocomplete="off" placeholder="Password" />
       <button type="submit">Enter</button>
       <p id="gate-error" hidden>Wrong password</p>
+      <p id="gate-status" hidden></p>
     </form>
   </div>
 
@@ -32,63 +33,52 @@
     <main>
       <section id="sec-home">
         <h1 id="home-title">SEU website</h1>
-        <p id="home-welcome" class="welcome">Welcome to seuhq.dpdns.org</p>
+        <p id="home-welcome" class="welcome"></p>
         <div id="cards" class="cards"></div>
       </section>
 
       <section id="sec-projects" hidden>
         <h1>Projects</h1>
         <p class="welcome">Things built at SEU HQ.</p>
-        <div class="cards">
-          <article class="card"><h2>SEU website</h2><p>This site — password-gated HQ homescreen.</p></article>
-          <article class="card"><h2>Project two</h2><p>Describe your next build here.</p></article>
-          <article class="card"><h2>Project three</h2><p>Describe another build here.</p></article>
-        </div>
+        <div id="project-cards" class="cards"></div>
       </section>
 
       <section id="sec-links" hidden>
         <h1>Links</h1>
         <p class="welcome">Quick jumps.</p>
-        <ul class="linklist">
-          <li><a href="https://github.com/uxp70">GitHub — uxp70</a></li>
-          <li><a href="https://github.com/uxp70/SEU-website">Site repo</a></li>
-        </ul>
+        <ul id="link-list" class="linklist"></ul>
       </section>
 
       <section id="sec-resources" hidden>
         <h1>Resources</h1>
         <p class="welcome">Docs and references.</p>
-        <ul class="linklist">
-          <li><a href="https://docs.github.com/en/pages">GitHub Pages docs</a></li>
-          <li><a href="https://render.com/docs">Render docs</a></li>
-        </ul>
+        <ul id="resource-list" class="linklist"></ul>
       </section>
     </main>
   </div>
 
   <script>
-    // Backend origin (Render). Same login, but verified server-side.
+    // All content lives on the backend and is only sent after a valid login.
+    // This page is an empty shell: Inspect / View Source reveals nothing.
     const API_BASE = "https://seu-backend-h7ca.onrender.com";
-    // Offline fallback hash (used only if backend is unreachable).
-    const FALLBACK_HASH = "3ef1d7e4be25371da4a48396925dee4f369088e794959baa69b3cc4886f758a3";
 
     const gate = document.getElementById("gate");
     const site = document.getElementById("site");
     const form = document.getElementById("gate-form");
     const input = document.getElementById("gate-input");
     const error = document.getElementById("gate-error");
+    const status = document.getElementById("gate-status");
     const logoutBtn = document.getElementById("logout");
 
-    const FALLBACK_CARDS = [
-      { title: "Projects", text: "SEU builds and experiments live here." },
-      { title: "Links", text: "Add quick links here next." },
-      { title: "Status", text: "All systems normal." }
-    ];
+    function setStatus(msg) {
+      status.textContent = msg;
+      status.hidden = !msg;
+    }
 
-    function renderCards(cards) {
-      const box = document.getElementById("cards");
+    function renderCards(boxId, items) {
+      const box = document.getElementById(boxId);
       box.innerHTML = "";
-      for (const c of (cards || FALLBACK_CARDS)) {
+      for (const c of (items || [])) {
         const el = document.createElement("article");
         el.className = "card";
         const h = document.createElement("h2");
@@ -100,10 +90,27 @@
       }
     }
 
+    function renderLinks(listId, items) {
+      const ul = document.getElementById(listId);
+      ul.innerHTML = "";
+      for (const l of (items || [])) {
+        const li = document.createElement("li");
+        const a = document.createElement("a");
+        a.textContent = l.title;
+        a.href = l.url;
+        a.rel = "noopener";
+        li.append(a);
+        ul.append(li);
+      }
+    }
+
     function showSite(data) {
       document.getElementById("home-title").textContent = data.title || "SEU website";
-      document.getElementById("home-welcome").textContent = data.welcome || "Welcome to seuhq.dpdns.org";
-      renderCards(data.cards);
+      document.getElementById("home-welcome").textContent = data.welcome || "";
+      renderCards("cards", data.cards);
+      renderCards("project-cards", data.projects);
+      renderLinks("link-list", data.links);
+      renderLinks("resource-list", data.resources);
       gate.hidden = true;
       site.hidden = false;
       showSection("home");
@@ -122,116 +129,82 @@
       btn.addEventListener("click", () => showSection(btn.dataset.section));
     });
 
-    // Pure-JS SHA-256: browsers disable crypto.subtle on plain http://,
-    // and this site has no HTTPS cert yet, so this is the login path.
-    function sha256Fallback(text) {
-      var K = [
-        0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-        0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-        0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-        0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
-        0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-        0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-        0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-        0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
-      ];
-      var bytes = new TextEncoder().encode(text);
-      var l = bytes.length, bitLen = l * 8, withOne = l + 1;
-      var padLen = (withOne % 64 <= 56) ? (56 - withOne % 64) : (120 - withOne % 64);
-      var total = withOne + padLen + 8;
-      var msg = new Uint8Array(total);
-      msg.set(bytes);
-      msg[l] = 0x80;
-      var dv = new DataView(msg.buffer);
-      dv.setUint32(total - 8, Math.floor(bitLen / 0x100000000));
-      dv.setUint32(total - 4, bitLen >>> 0);
-      var H = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
-      var w = new Uint32Array(64);
-      function rotr(x, n) { return (x >>> n) | (x << (32 - n)); }
-      for (var off = 0; off < total; off += 64) {
-        for (var i = 0; i < 16; i++) w[i] = dv.getUint32(off + i * 4);
-        for (i = 16; i < 64; i++) {
-          var s0 = rotr(w[i-15],7) ^ rotr(w[i-15],18) ^ (w[i-15] >>> 3);
-          var s1 = rotr(w[i-2],17) ^ rotr(w[i-2],19) ^ (w[i-2] >>> 10);
-          w[i] = (w[i-16] + s0 + w[i-7] + s1) | 0;
-        }
-        var a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
-        for (i = 0; i < 64; i++) {
-          var S1 = rotr(e,6) ^ rotr(e,11) ^ rotr(e,25);
-          var ch = (e & f) ^ (~e & g);
-          var t1 = (h + S1 + ch + K[i] + w[i]) | 0;
-          var S0 = rotr(a,2) ^ rotr(a,13) ^ rotr(a,22);
-          var maj = (a & b) ^ (a & c) ^ (b & c);
-          var t2 = (S0 + maj) | 0;
-          h=g; g=f; f=e; e=(d+t1)|0; d=c; c=b; b=a; a=(t1+t2)|0;
-        }
-        H=[(H[0]+a)|0,(H[1]+b)|0,(H[2]+c)|0,(H[3]+d)|0,(H[4]+e)|0,(H[5]+f)|0,(H[6]+g)|0,(H[7]+h)|0];
+    async function fetchJSON(path, options) {
+      const r = await fetch(API_BASE + path, options);
+      if (!r.ok) {
+        const err = new Error("http " + r.status);
+        err.status = r.status;
+        throw err;
       }
-      return H.map(function(x){ return (x >>> 0).toString(16).padStart(8, "0"); }).join("");
+      return r.json();
     }
 
-    async function sha256Hex(text) {
-      try {
-        if (window.isSecureContext && crypto.subtle) {
-          const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-          return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+    // Render's free tier sleeps when idle: retry while it wakes up.
+    async function withWakeUpRetries(fn, label) {
+      let lastErr = null;
+      for (let attempt = 1; attempt <= 4; attempt++) {
+        try {
+          return await fn();
+        } catch (e) {
+          lastErr = e;
+          if (e.status === 401) throw e; // wrong password / no session: don't retry
+          setStatus(label + " (attempt " + attempt + "/4)...");
+          await new Promise(r => setTimeout(r, attempt * 5000));
         }
-      } catch { /* fall through to pure-JS below */ }
-      return sha256Fallback(text);
+      }
+      throw lastErr;
     }
 
     async function backendLogin(password) {
-      const r = await fetch(API_BASE + "/api/login", {
+      await withWakeUpRetries(() => fetch(API_BASE + "/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ password })
-      });
-      if (!r.ok) return false;
-      const home = await fetch(API_BASE + "/api/home", { credentials: "include" });
-      if (!home.ok) return false;
-      showSite(await home.json());
-      localStorage.setItem("seu-auth", "backend");
-      return true;
+      }).then(r => {
+        if (r.status === 401) throw Object.assign(new Error("wrong password"), { status: 401 });
+        if (!r.ok) throw new Error("http " + r.status);
+      }), "Contacting HQ server...");
+      const home = await fetchJSON("/api/home", { credentials: "include" });
+      showSite(home);
+      try { localStorage.setItem("seu-auth", "1"); } catch {}
     }
 
     async function resumeBackend() {
-      try {
-        const me = await fetch(API_BASE + "/api/me", { credentials: "include" });
-        if (!me.ok) return false;
-        if (!(await me.json()).ok) return false;
-        const home = await fetch(API_BASE + "/api/home", { credentials: "include" });
-        if (!home.ok) return false;
-        showSite(await home.json());
-        return true;
-      } catch { return false; }
+      const me = await fetchJSON("/api/me", { credentials: "include" });
+      if (!me.ok) return false;
+      const home = await fetchJSON("/api/home", { credentials: "include" });
+      showSite(home);
+      return true;
     }
 
     async function init() {
-      // Backend session cookie persists across tabs until logout/expiry.
+      let remembered = false;
+      try { remembered = localStorage.getItem("seu-auth") === "1"; } catch {}
+      if (!remembered) return;
+      setStatus("Restoring session...");
       try {
-        if (await resumeBackend()) { localStorage.setItem("seu-auth", "backend"); return; }
-      } catch { /* fall through to gate */ }
-      if (localStorage.getItem("seu-auth") === "local") {
-        showSite({ title: "SEU website", welcome: "Welcome to seuhq.dpdns.org", cards: FALLBACK_CARDS });
+        await withWakeUpRetries(resumeBackend, "Restoring session...");
+        setStatus("");
+      } catch {
+        try { localStorage.removeItem("seu-auth"); } catch {}
+        setStatus("");
       }
     }
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       error.hidden = true;
+      setStatus("Checking...");
       const password = input.value;
-      // 1) Try backend first.
       try {
-        if (await backendLogin(password)) { input.value = ""; return; }
-      } catch { /* backend unreachable -> fallback below */ }
-      // 2) Fallback: local hash check (works while backend is asleep/unreachable).
-      if ((await sha256Hex(password)) === FALLBACK_HASH) {
-        localStorage.setItem("seu-auth", "local");
+        await backendLogin(password);
         input.value = "";
-        showSite({ title: "SEU website", welcome: "Welcome to seuhq.dpdns.org", cards: FALLBACK_CARDS });
-      } else {
+        setStatus("");
+      } catch (err) {
+        setStatus("");
         error.hidden = false;
+        error.textContent = err && err.status === 401 ? "Wrong password" : "Server unreachable - try again";
         input.value = "";
         input.focus();
       }
@@ -239,7 +212,7 @@
 
     logoutBtn.addEventListener("click", async () => {
       try { await fetch(API_BASE + "/api/logout", { method: "POST", credentials: "include" }); } catch {}
-      localStorage.removeItem("seu-auth");
+      try { localStorage.removeItem("seu-auth"); } catch {}
       site.hidden = true;
       gate.hidden = false;
       input.focus();

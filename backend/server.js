@@ -118,7 +118,8 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { ok: true });
   }
 
-  // Gated homescreen data: only returned with a valid session.
+  // Gated site content: only returned with a valid session.
+  // Nothing protected lives in the frontend HTML/JS - inspect shows an empty shell.
   if (req.method === "GET" && url.pathname === "/api/home") {
     if (!validSession(parseCookies(req).seu_session)) {
       return send(res, 401, { ok: false, error: "unauthorized" });
@@ -131,6 +132,19 @@ const server = http.createServer(async (req, res) => {
         { title: "Projects", text: "SEU builds and experiments live here." },
         { title: "Links", text: "Add quick links here next." },
         { title: "Status", text: "All systems normal." }
+      ],
+      projects: [
+        { title: "SEU website", text: "This site - password-gated HQ homescreen." },
+        { title: "Project two", text: "Describe your next build here." },
+        { title: "Project three", text: "Describe another build here." }
+      ],
+      links: [
+        { title: "GitHub - uxp70", url: "https://github.com/uxp70" },
+        { title: "Site repo", url: "https://github.com/uxp70/SEU-website" }
+      ],
+      resources: [
+        { title: "GitHub Pages docs", url: "https://docs.github.com/en/pages" },
+        { title: "Render docs", url: "https://render.com/docs" }
       ]
     });
   }

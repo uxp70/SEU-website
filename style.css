@@ -61,6 +61,11 @@ body {
   margin: 0.75rem 0 0;
 }
 
+#gate-status {
+  color: #38bdf8;
+  margin: 0.75rem 0 0;
+}
+
 #site {
   display: flex;
   min-height: 100vh;
