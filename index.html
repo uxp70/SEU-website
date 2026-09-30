@@ -988,7 +988,29 @@
       if (k.timeout && !k.network && !k.http) {
         return "Timed out reaching the server 4 times. Something on this phone may be blocking it (VPN, adblocker, or DNS filter) - try WiFi vs mobile data, and disable VPN/adblock for this site.";
       }
-      return "Couldn't reach the server at all. Check internet, turn off VPN/adblocker, then retry.";
+      return "Couldn't reach the server at all. CHECKING_WHAT";
+    }
+
+    async function connectionDetail() {
+      const withTimeout = (ms) => {
+        if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+          return AbortSignal.timeout(ms);
+        }
+        const c = new AbortController();
+        setTimeout(() => c.abort(), ms);
+        return c.signal;
+      };
+      try {
+        await fetch("https://www.google.com/generate_204", { mode: "no-cors", signal: withTimeout(10000) });
+      } catch {
+        return "Test: this phone has no working internet right now - toggle airplane mode and retry.";
+      }
+      try {
+        await fetch(API_BASE + "/api/health", { mode: "no-cors", signal: withTimeout(10000) });
+        return "Test: internet works and the server answers - retry the login; if it persists, tell HQ the exact text.";
+      } catch {
+        return "Test: internet works, but this phone specifically cannot reach the backend address (DNS/adblocker/VPN block likely). Try the other phone's network, disable VPN and Safari extensions.";
+      }
     }
 
     async function backendLogin(password) {
@@ -1072,11 +1094,20 @@
       } catch (err) {
         setStatus("");
         error.hidden = false;
-        error.textContent = err && err.status === 401
-          ? "Wrong password"
-          : err && err.stuck
-            ? "Password accepted, but this browser won't hold the session. Try Chrome, or turn off 'Prevent Cross-Site Tracking' in Settings."
-            : unreachableMessage(err);
+        if (err && err.status === 401) {
+          error.textContent = "Wrong password";
+        } else if (err && err.stuck) {
+          error.textContent = "Password accepted, but this browser won't hold the session. Try Chrome, or turn off 'Prevent Cross-Site Tracking' in Settings.";
+        } else {
+          error.textContent = unreachableMessage(err);
+          const k = (err && err.kinds) || {};
+          if (!err.httpStatus && (k.network || (!k.timeout && !k.http))) {
+            error.textContent += " Running connection test...";
+            try {
+              error.textContent = unreachableMessage(err) + " " + await connectionDetail();
+            } catch {}
+          }
+        }
         input.value = "";
         input.focus();
       }
