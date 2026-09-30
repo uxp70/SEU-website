@@ -26,6 +26,7 @@
         <button data-section="projects" type="button">Projects</button>
         <button data-section="links" type="button">Links</button>
         <button data-section="resources" type="button">Resources</button>
+        <button data-section="certs" type="button">Certs</button>
       </nav>
       <button id="logout" type="button">Log out</button>
     </aside>
@@ -53,6 +54,26 @@
         <h1>Resources</h1>
         <p class="welcome">Docs and references.</p>
         <ul id="resource-list" class="linklist"></ul>
+      </section>
+
+      <section id="sec-certs" hidden>
+        <h1>Certs</h1>
+        <p class="welcome">Signing certificates (via sideloading.net, synced every 30 min).</p>
+        <div class="filter-row">
+          <button data-cert-filter="signed" class="active" type="button">Signed</button>
+          <button data-cert-filter="revoked" type="button">Revoked</button>
+          <button data-cert-filter="all" type="button">All</button>
+          <button data-cert-filter="missingP12" type="button">Missing P12</button>
+          <select id="cert-amount">
+            <option value="10">10</option>
+            <option value="25">25</option>
+            <option value="50" selected>50</option>
+            <option value="100">100</option>
+          </select>
+          <button id="cert-reload" type="button">Reload</button>
+        </div>
+        <p id="cert-status" class="welcome"></p>
+        <div id="cert-list" class="cards"></div>
       </section>
     </main>
   </div>
@@ -126,8 +147,94 @@
     }
 
     document.querySelectorAll(".sidebar nav button").forEach(btn => {
-      btn.addEventListener("click", () => showSection(btn.dataset.section));
+      btn.addEventListener("click", () => {
+        showSection(btn.dataset.section);
+        if (btn.dataset.section === "certs") loadCerts(false);
+      });
     });
+
+    const DL_BASE = "https://sideloading.net/api/certificates/download";
+    let certFilter = "signed";
+    const certLoaded = {};
+
+    function certKey() {
+      return certFilter + ":" + document.getElementById("cert-amount").value;
+    }
+
+    function certBadgeEl(certStatus) {
+      const s = certStatus || "Unknown";
+      const span = document.createElement("span");
+      if (s.includes("Signed")) { span.className = "badge badge-ok"; span.textContent = "Signed"; }
+      else if (s.includes("Revoked")) { span.className = "badge badge-bad"; span.textContent = "Revoked"; }
+      else { span.className = "badge"; span.textContent = s; }
+      return span;
+    }
+
+    function renderCerts(list) {
+      const box = document.getElementById("cert-list");
+      box.innerHTML = "";
+      const missing = certFilter === "missingP12";
+      for (const c of (list || [])) {
+        const el = document.createElement("article");
+        el.className = "card";
+        const h = document.createElement("h2");
+        h.textContent = c.nickname || c.name || ("Cert #" + c.id);
+        const badge = document.createElement("p");
+        badge.append(certBadgeEl(c.status));
+        const meta = document.createElement("p");
+        meta.className = "cert-meta";
+        meta.textContent = "Valid: " + (c.valid_from || "?") + " - " + (c.valid_to || "?");
+        const dl = document.createElement("p");
+        dl.className = "dl-row";
+        const base = DL_BASE + "/" + (missing ? "missingP12/" + c.id : c.id);
+        const files = missing
+          ? [["zip", "cert.zip"], ["profile", "cert.mobileprovision"]]
+          : [["zip", "cert.zip"], ["p12", "cert.p12"], ["profile", "cert.mobileprovision"], ["password", "password.txt"]];
+        for (const [label, file] of files) {
+          const a = document.createElement("a");
+          a.textContent = label;
+          a.href = base + "/" + file;
+          a.rel = "noopener";
+          dl.append(a, document.createTextNode(" "));
+        }
+        el.append(h, badge, meta, dl);
+        box.append(el);
+      }
+      if (!list || !list.length) {
+        const p = document.createElement("p");
+        p.className = "welcome";
+        p.textContent = "No certificates found.";
+        box.append(p);
+      }
+    }
+
+    async function loadCerts(force) {
+      const key = certKey();
+      if (!force && certLoaded[key]) return;
+      const statusEl = document.getElementById("cert-status");
+      statusEl.textContent = "Loading certs...";
+      try {
+        const amount = document.getElementById("cert-amount").value;
+        const r = await fetch(API_BASE + "/api/certs?status=" + certFilter + "&amount=" + amount, { credentials: "include" });
+        if (r.status === 401) { statusEl.textContent = "Session expired - log in again."; return; }
+        if (!r.ok) throw new Error("http " + r.status);
+        renderCerts(await r.json());
+        certLoaded[key] = true;
+        statusEl.textContent = "";
+      } catch {
+        statusEl.textContent = "Could not load certs - try Reload.";
+      }
+    }
+
+    document.querySelectorAll("[data-cert-filter]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("[data-cert-filter]").forEach(b => b.classList.toggle("active", b === btn));
+        certFilter = btn.dataset.certFilter;
+        loadCerts(true);
+      });
+    });
+    document.getElementById("cert-amount").addEventListener("change", () => loadCerts(true));
+    document.getElementById("cert-reload").addEventListener("click", () => loadCerts(true));
 
     async function fetchJSON(path, options) {
       const r = await fetch(API_BASE + path, options);

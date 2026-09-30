@@ -188,6 +188,70 @@ main h1 {
   color: #38bdf8;
 }
 
+.filter-row {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.filter-row button, .filter-row select {
+  padding: 0.5rem 0.8rem;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #1e293b;
+  color: #f8fafc;
+  cursor: pointer;
+}
+
+.filter-row button.active {
+  background: #38bdf8;
+  border-color: #38bdf8;
+  color: #082f49;
+  font-weight: 700;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: #334155;
+  font-size: 0.85rem;
+  margin: 0.5rem 0 0;
+}
+
+.badge-ok {
+  background: #14532d;
+  color: #bbf7d0;
+}
+
+.badge-bad {
+  background: #450a0a;
+  color: #fecaca;
+}
+
+.cert-meta {
+  opacity: 0.7;
+  font-size: 0.9rem;
+  margin: 0.5rem 0;
+}
+
+.dl-row a {
+  display: inline-block;
+  padding: 0.3rem 0.7rem;
+  margin: 0.15rem 0.25rem 0.15rem 0;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  color: #38bdf8;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.dl-row a:hover {
+  background: #334155;
+}
+
 @media (max-width: 640px) {
   #site {
     flex-direction: column;

@@ -1,6 +1,7 @@
 // SEU auth backend - zero dependencies (Node stdlib only).
 // Env: SEU_PASSWORD_HASH (sha256 hex), SEU_SECRET, PORT, ALLOWED_ORIGINS
 const http = require("http");
+const https = require("https");
 const crypto = require("crypto");
 
 const PORT = Number(process.env.PORT || 3000);
@@ -64,6 +65,18 @@ function sessionCookie(token, req) {
   const maxAge = token ? 43200 : 0;
   const attrs = `HttpOnly; Path=/; Max-Age=${maxAge}; ${secure ? "SameSite=None; Secure" : "SameSite=Lax"}`;
   return token ? `seu_session=${token}; ${attrs}` : `seu_session=; ${attrs}`;
+}
+
+function fetchUpstream(url) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { timeout: 20000 }, (res) => {
+      let data = "";
+      res.on("data", c => { data += c; if (data.length > 5e6) req.destroy(); });
+      res.on("end", () => resolve({ status: res.statusCode || 0, body: data }));
+    });
+    req.on("timeout", () => { req.destroy(); reject(new Error("upstream timeout")); });
+    req.on("error", reject);
+  });
 }
 
 function validSession(token) {
@@ -151,6 +164,27 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && url.pathname === "/api/health") {
     return send(res, 200, { ok: true });
+  }
+
+  // Cert list proxy (sideloading.net NexCerts). Gated: requires a valid session.
+  if (req.method === "GET" && url.pathname === "/api/certs") {
+    if (!validSession(parseCookies(req).seu_session)) {
+      return send(res, 401, { ok: false, error: "unauthorized" });
+    }
+    const filter = url.searchParams.get("status") || "signed";
+    if (!["all", "signed", "revoked", "missingP12"].includes(filter)) {
+      return send(res, 400, { ok: false, error: "bad status" });
+    }
+    const amount = Math.min(200, Math.max(1, parseInt(url.searchParams.get("amount") || "50", 10) || 50));
+    try {
+      const up = await fetchUpstream(`https://sideloading.net/api/certificates/list/${filter}/${amount}`);
+      if (up.status !== 200) return send(res, 502, { ok: false, error: "cert provider error" });
+      JSON.parse(up.body); // validate JSON before relaying
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(up.body);
+    } catch {
+      return send(res, 502, { ok: false, error: "cert provider unreachable" });
+    }
   }
 
   return send(res, 404, { ok: false, error: "not found" });
