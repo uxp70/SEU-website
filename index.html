@@ -195,7 +195,13 @@
           <label class="file-label">App name (optional)<input id="sign-appname" type="text" placeholder="My App" /></label>
           <button id="sign-go" type="button" class="primary-btn">Sign it</button>
           <p id="sign-status" class="welcome"></p>
-          <p id="sign-result" hidden><a id="sign-download" href="#">Download signed IPA</a></p>
+          <div id="sign-result" hidden>
+            <div class="filter-row">
+              <button id="sign-download-btn" type="button">Download IPA</button>
+              <a id="sign-install" class="upload-link" href="#">Install on iOS</a>
+            </div>
+            <p class="cert-meta">Install opens your device's install prompt. Links expire after 30 minutes.</p>
+          </div>
         </div>
       </section>
     </main>
@@ -547,10 +553,13 @@
       prev.hidden = false;
     });
 
+    let lastSignToken = null;
+
     document.getElementById("sign-go").addEventListener("click", async () => {
       const statusEl = document.getElementById("sign-status");
       const resultEl = document.getElementById("sign-result");
       resultEl.hidden = true;
+      lastSignToken = null;
       const ipa = document.getElementById("sign-ipa").files[0];
       if (!ipa) { statusEl.textContent = "Choose an IPA file first."; return; }
       const fd = new FormData();
@@ -580,15 +589,37 @@
           statusEl.textContent = msg;
           return;
         }
-        const blob = await r.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.getElementById("sign-download");
-        a.href = url;
-        a.download = "signed-" + ipa.name.replace(/\.ipa$/i, "") + ".ipa";
+        const data = await r.json();
+        lastSignToken = data.token;
+        const manifestUrl = API_BASE + "/dl/" + data.token + "/manifest.plist";
+        const install = document.getElementById("sign-install");
+        install.href = "itms-services://?action=download-manifest&url=" + encodeURIComponent(manifestUrl);
         resultEl.hidden = false;
-        statusEl.textContent = "Signed! Use the link below (valid for this session).";
+        statusEl.textContent = "Signed " + (data.title || "app") + " " + (data.version || "") + " - download it or install directly on iOS.";
       } catch {
         statusEl.textContent = "Server unreachable - try again.";
+      }
+    });
+
+    document.getElementById("sign-download-btn").addEventListener("click", async () => {
+      if (!lastSignToken) return;
+      const statusEl = document.getElementById("sign-status");
+      statusEl.textContent = "Preparing download...";
+      try {
+        const r = await fetch(API_BASE + "/api/signed?token=" + lastSignToken, { credentials: "include" });
+        if (!r.ok) throw new Error("http " + r.status);
+        const blob = await r.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "signed-app.ipa";
+        document.body.append(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        statusEl.textContent = "Download started.";
+      } catch {
+        statusEl.textContent = "Download failed - the link may have expired. Sign again.";
       }
     });
 

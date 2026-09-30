@@ -328,6 +328,168 @@ function replaceZipIcons(ipaPath, iconBytes) {
   return targets.length;
 }
 
+function parseBplist(buf) {
+  if (buf.slice(0, 8).toString() !== "bplist00") throw new Error("not bplist");
+  const topObject = Number(buf.readBigUInt64BE(buf.length - 32 + 16));
+  const offTableOff = Number(buf.readBigUInt64BE(buf.length - 32 + 24));
+  const offSize = buf[buf.length - 32 + 6];
+  const refSize = buf[buf.length - 32 + 7];
+  function offset(i) {
+    if (offSize === 1) return buf[offTableOff + i];
+    if (offSize === 2) return buf.readUInt16BE(offTableOff + i * 2);
+    if (offSize === 4) return buf.readUInt32BE(offTableOff + i * 4);
+    return Number(buf.readBigUInt64BE(offTableOff + i * 8));
+  }
+  function ref(b, i) {
+    if (refSize === 1) return b[i];
+    if (refSize === 2) return b.readUInt16BE(i * 2);
+    if (refSize === 4) return b.readUInt32BE(i * 4);
+    return Number(b.readBigUInt64BE(i * 8));
+  }
+  function readInt(b) {
+    if (b.length === 1) return b[0];
+    if (b.length === 2) return b.readUInt16BE(0);
+    if (b.length === 4) return b.readUInt32BE(0);
+    return Number(b.readBigUInt64BE(0));
+  }
+  function val(idx) {
+    const o = offset(idx);
+    const marker = buf[o];
+    const type = marker >> 4, info = marker & 0x0F;
+    const count = () => {
+      if (info !== 0xF) return info;
+      const nb = 1 << (buf[o + 1] & 0x0F);
+      return readInt(buf.slice(o + 2, o + 2 + nb));
+    };
+    const h = () => o + 1 + (info === 0xF ? 1 + (1 << (buf[o + 1] & 0x0F)) : 0);
+    switch (type) {
+      case 0x0:
+        if (info === 0x8) return false;
+        if (info === 0x9) return true;
+        return null;
+      case 0x1: return readInt(buf.slice(o + 1, o + 1 + (1 << info)));
+      case 0x2: return buf.readDoubleBE(o + 1);
+      case 0x3: return new Date((978307200 + buf.readDoubleBE(o + 1)) * 1000);
+      case 0x4: return buf.slice(h(), h() + count());
+      case 0x5: return buf.slice(h(), h() + count()).toString("utf8");
+      case 0x6: {
+        const n = count(), s = buf.slice(h(), h() + n * 2);
+        let out = "";
+        for (let i = 0; i < n; i++) out += String.fromCharCode(s.readUInt16BE(i * 2));
+        return out;
+      }
+      case 0x8: return ref(buf.slice(h(), h() + count() * refSize), 0);
+      case 0xA: {
+        const n = count(), hb = h(), out = [];
+        for (let i = 0; i < n; i++) out.push(val(ref(buf.slice(hb, hb + n * refSize), i)));
+        return out;
+      }
+      case 0xD: {
+        const n = count(), hb = h(), out = {};
+        for (let i = 0; i < n; i++) {
+          out[val(ref(buf.slice(hb, hb + n * refSize), i))] =
+            val(ref(buf.slice(hb + n * refSize, hb + 2 * n * refSize), i));
+        }
+        return out;
+      }
+      default: return null;
+    }
+  }
+  return val(topObject);
+}
+
+function parsePlistMeta(buf) {
+  if (buf.slice(0, 6).toString() === "bplist") {
+    const d = parseBplist(buf) || {};
+    return {
+      bundleId: d.CFBundleIdentifier || null,
+      version: d.CFBundleShortVersionString || d.CFBundleVersion || null,
+      name: d.CFBundleDisplayName || d.CFBundleName || null
+    };
+  }
+  const text = buf.toString("utf8");
+  const get = (key) => {
+    const m = text.match(new RegExp("<key>" + key + "</key>\\s*<string>([^<]*)</string>"));
+    return m ? m[1] : null;
+  };
+  return {
+    bundleId: get("CFBundleIdentifier"),
+    version: get("CFBundleShortVersionString") || get("CFBundleVersion"),
+    name: get("CFBundleDisplayName") || get("CFBundleName")
+  };
+}
+
+// Read one zip entry's bytes (stored or deflated) by name pattern.
+function readZipEntry(ipaPath, pattern) {
+  const buf = fs.readFileSync(ipaPath);
+  const entries = parseZipEntries(buf);
+  const e = entries.find(x => pattern.test(x.name));
+  if (!e) return null;
+  const nl = buf.readUInt16LE(e.localOff + 26);
+  const el = buf.readUInt16LE(e.localOff + 28);
+  const lc = buf.readUInt32LE(e.localOff + 18);
+  const start = e.localOff + 30 + nl + el;
+  const raw = buf.slice(start, start + (lc || e.compSize));
+  if (e.method === 0) return raw;
+  if (e.method === 8) return zlib.inflateRawSync(raw);
+  return null;
+}
+
+function appMetaFromIpa(ipaPath) {
+  try {
+    const plist = readZipEntry(ipaPath, /Payload\/[^/]+\.app\/Info\.plist$/);
+    if (!plist) return {};
+    const m = parsePlistMeta(plist);
+    return { bundleId: m.bundleId, version: m.version, name: m.name };
+  } catch { return {}; }
+}
+
+function escXml(s) {
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// Install hosting: unguessable per-sign links, auto-expire. The manifested
+// IPA URL must be public (Apple's installer cannot log in), so the token
+// itself is the only protection - 256 bits, 30 minutes, then deleted.
+const dlStore = new Map();
+const DL_TTL_MS = 30 * 60 * 1000;
+
+function buildManifest(ipaUrl, bundleId, version, title) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>items</key>
+  <array>
+    <dict>
+      <key>assets</key>
+      <array>
+        <dict>
+          <key>kind</key>
+          <string>software-package</string>
+          <key>url</key>
+          <string>${escXml(ipaUrl)}</string>
+        </dict>
+      </array>
+      <key>metadata</key>
+      <dict>
+        <key>bundle-identifier</key>
+        <string>${escXml(bundleId)}</string>
+        <key>bundle-version</key>
+        <string>${escXml(version)}</string>
+        <key>kind</key>
+        <string>software</string>
+        <key>title</key>
+        <string>${escXml(title)}</string>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>
+`;
+}
+
 function runCmd(cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {
     execFile(cmd, args, { timeout: 600000, maxBuffer: 2e6, ...opts }, (err, stdout, stderr) => {
@@ -501,6 +663,12 @@ setInterval(() => {
   const now = Date.now();
   for (const [t, exp] of sessions) if (exp < now) sessions.delete(t);
   for (const [ip, e] of loginAttempts) if (e.reset < now) loginAttempts.delete(ip);
+  for (const [tok, e] of dlStore) {
+    if (e.at + DL_TTL_MS < now) {
+      dlStore.delete(tok);
+      fs.rm(e.dir, { recursive: true, force: true }, () => {});
+    }
+  }
 }, 15 * 60 * 1000).unref();
 
 function cors(req, res) {
@@ -902,17 +1070,74 @@ const server = http.createServer(async (req, res) => {
       }
 
       const st = fs.statSync(outPath);
-      res.writeHead(200, {
-        "Content-Type": "application/octet-stream",
-        "Content-Length": st.size,
-        "Content-Disposition": `attachment; filename="${outName.replace(/"/g, "")}"`
+      const meta = appMetaFromIpa(files.ipa.path);
+      const finalBundleId = bundleId || meta.bundleId || "";
+      const finalVersion = meta.version || "1.0";
+      const finalTitle = appName || meta.name || outName.replace(/\.ipa$/i, "");
+      if (!finalBundleId) {
+        throw { status: 400, message: "enter the app's bundle ID (needed for install)" };
+      }
+      const token = crypto.randomBytes(32).toString("hex");
+      const dlDir = path.join(os.tmpdir(), "seu-dl", token);
+      fs.mkdirSync(dlDir, { recursive: true });
+      const hostedName = "app.ipa";
+      fs.copyFileSync(outPath, path.join(dlDir, hostedName));
+      const origin = "https://" + (req.headers.host || "").split(",")[0].trim();
+      const ipaUrl = origin + "/dl/" + token + "/" + hostedName;
+      fs.writeFileSync(path.join(dlDir, "manifest.plist"),
+        buildManifest(ipaUrl, finalBundleId, finalVersion, finalTitle));
+      dlStore.set(token, { dir: dlDir, at: Date.now() });
+      cleanup();
+      return send(res, 200, {
+        ok: true, token, fileName: outName, size: st.size,
+        bundleId: finalBundleId, version: finalVersion, title: finalTitle
       });
-      fs.createReadStream(outPath).on("close", cleanup).on("error", cleanup).pipe(res);
     } catch (e) {
       cleanup();
       const status = (e && e.status) || 500;
       return send(res, status, { ok: false, error: (e && e.message) || "sign failed" });
     }
+    return;
+  }
+
+  // Gated re-download of a signed IPA (for the Download button).
+  if (req.method === "GET" && url.pathname === "/api/signed") {
+    if (!validSession(parseCookies(req).seu_session)) {
+      return send(res, 401, { ok: false, error: "unauthorized" });
+    }
+    const token = url.searchParams.get("token") || "";
+    const entry = (/^[a-f0-9]{64}$/.test(token) && dlStore.get(token)) || null;
+    if (!entry) return send(res, 404, { ok: false, error: "expired - sign again" });
+    const fp = path.join(entry.dir, "app.ipa");
+    if (!fs.existsSync(fp)) return send(res, 404, { ok: false, error: "expired - sign again" });
+    const st = fs.statSync(fp);
+    res.writeHead(200, {
+      "Content-Type": "application/octet-stream",
+      "Content-Length": st.size,
+      "Content-Disposition": 'attachment; filename="signed-app.ipa"'
+    });
+    fs.createReadStream(fp).pipe(res);
+    return;
+  }
+
+  // Public install files. No session (Apple's installer cannot log in);
+  // the 256-bit token in the URL is the only protection, links expire.
+  if (req.method === "GET" && url.pathname.startsWith("/dl/")) {
+    const parts = url.pathname.split("/");
+    const token = parts[2] || "";
+    const file = parts[3] || "";
+    const entry = (/^[a-f0-9]{64}$/.test(token) && dlStore.get(token)) || null;
+    if (!entry || (file !== "app.ipa" && file !== "manifest.plist")) {
+      return send(res, 404, { ok: false, error: "not found" });
+    }
+    const fp = path.join(entry.dir, file);
+    if (!fs.existsSync(fp)) return send(res, 404, { ok: false, error: "not found" });
+    const st = fs.statSync(fp);
+    res.writeHead(200, {
+      "Content-Type": file === "manifest.plist" ? "application/xml" : "application/octet-stream",
+      "Content-Length": st.size
+    });
+    fs.createReadStream(fp).pipe(res);
     return;
   }
 
