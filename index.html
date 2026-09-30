@@ -30,6 +30,8 @@
         <button data-section="files" type="button">Raw File Storage</button>
         <button data-section="repo" type="button">Repository</button>
         <button data-section="ipas" type="button">IPAs</button>
+        <button data-section="featured" type="button">Featured</button>
+        <button data-section="recent" type="button">Recently Added</button>
       </nav>
       <button id="logout" type="button">Log out</button>
     </aside>
@@ -116,8 +118,9 @@
 
       <section id="sec-ipas" hidden>
         <h1>IPAs</h1>
-        <p class="welcome">Searchable IPA library - always up to date, no manual uploads.</p>
+        <p class="welcome">Searchable IPA libraries - always up to date, no manual uploads.</p>
         <div class="filter-row">
+          <select id="ipa-source"></select>
           <input id="ipa-search" type="search" placeholder="Search name or bundle ID..." />
           <button id="ipa-go" type="button">Search</button>
         </div>
@@ -125,6 +128,23 @@
         <div id="ipa-list" class="app-list"></div>
         <div class="filter-row">
           <button id="ipa-more" type="button" hidden>Load more</button>
+        </div>
+      </section>
+
+      <section id="sec-featured" hidden>
+        <h1>Featured</h1>
+        <p class="welcome">Hand-picked essentials, resolved live from the libraries.</p>
+        <p id="featured-status" class="welcome"></p>
+        <div id="featured-list" class="app-list"></div>
+      </section>
+
+      <section id="sec-recent" hidden>
+        <h1>Recently Added</h1>
+        <p class="welcome">Newest app updates across all libraries.</p>
+        <p id="recent-status" class="welcome"></p>
+        <div id="recent-list" class="app-list"></div>
+        <div class="filter-row">
+          <button id="recent-more" type="button" hidden>Load more</button>
         </div>
       </section>
     </main>
@@ -154,6 +174,9 @@
       if (name === "files") { loadFiles(false); startFileWatch(); }
       else stopFileWatch();
       if (name === "repo") loadRepo(false);
+      if (name === "ipas") loadSources();
+      if (name === "featured") loadFeatured();
+      if (name === "recent" && !document.getElementById("recent-list").children.length) loadRecent(true);
     }
 
     function renderCards(boxId, items) {
@@ -222,6 +245,30 @@
     let ipaQuery = "", ipaPage = 0, ipaTotal = 0;
     const IPA_LIMIT = 25;
 
+    function ipaSource() {
+      return document.getElementById("ipa-source").value || "fastsign";
+    }
+
+    async function loadSources() {
+      const sel = document.getElementById("ipa-source");
+      if (sel.options.length) return;
+      try {
+        const r = await fetch(API_BASE + "/api/sources", { credentials: "include", cache: "no-store" });
+        if (!r.ok) throw new Error("http " + r.status);
+        for (const s of await r.json()) {
+          const o = document.createElement("option");
+          o.value = s.id;
+          o.textContent = s.name + (s.appCount ? " (" + s.appCount + ")" : "");
+          sel.append(o);
+        }
+      } catch {
+        const o = document.createElement("option");
+        o.value = "fastsign";
+        o.textContent = "IPA Library";
+        sel.append(o);
+      }
+    }
+
     function appendIpas(apps) {
       const box = document.getElementById("ipa-list");
       for (const a of (apps || [])) {
@@ -244,7 +291,7 @@
       }
       statusEl.textContent = "Searching...";
       try {
-        const r = await fetch(API_BASE + "/api/ipas?q=" + encodeURIComponent(ipaQuery) + "&page=" + ipaPage + "&limit=" + IPA_LIMIT, { credentials: "include", cache: "no-store" });
+        const r = await fetch(API_BASE + "/api/ipas?source=" + encodeURIComponent(ipaSource()) + "&q=" + encodeURIComponent(ipaQuery) + "&page=" + ipaPage + "&limit=" + IPA_LIMIT, { credentials: "include", cache: "no-store" });
         if (r.status === 401) { statusEl.textContent = "Session expired - log in again."; return; }
         if (!r.ok) throw new Error("http " + r.status);
         const data = await r.json();
@@ -263,6 +310,54 @@
       if (e.key === "Enter") ipaSearch(true);
     });
     document.getElementById("ipa-more").addEventListener("click", () => { ipaPage++; ipaSearch(false); });
+
+    let featuredLoaded = false;
+
+    async function loadFeatured() {
+      if (featuredLoaded) return;
+      const statusEl = document.getElementById("featured-status");
+      statusEl.textContent = "Loading featured apps...";
+      try {
+        const r = await fetch(API_BASE + "/api/featured", { credentials: "include", cache: "no-store" });
+        if (r.status === 401) { statusEl.textContent = "Session expired - log in again."; return; }
+        if (!r.ok) throw new Error("http " + r.status);
+        const box = document.getElementById("featured-list");
+        box.innerHTML = "";
+        for (const a of await r.json()) box.append(appRow(a));
+        featuredLoaded = true;
+        statusEl.textContent = "";
+      } catch {
+        statusEl.textContent = "Could not load featured apps - try again.";
+      }
+    }
+
+    let recentPage = 0, recentTotal = 0;
+    const RECENT_LIMIT = 25;
+
+    async function loadRecent(reset) {
+      const statusEl = document.getElementById("recent-status");
+      if (reset) {
+        recentPage = 0;
+        document.getElementById("recent-list").innerHTML = "";
+      }
+      statusEl.textContent = "Loading newest apps...";
+      try {
+        const r = await fetch(API_BASE + "/api/recent?page=" + recentPage + "&limit=" + RECENT_LIMIT, { credentials: "include", cache: "no-store" });
+        if (r.status === 401) { statusEl.textContent = "Session expired - log in again."; return; }
+        if (!r.ok) throw new Error("http " + r.status);
+        const data = await r.json();
+        recentTotal = data.total;
+        const box = document.getElementById("recent-list");
+        for (const a of (data.apps || [])) box.append(appRow(a));
+        document.getElementById("recent-more").hidden =
+          box.children.length >= recentTotal || recentTotal === 0;
+        statusEl.textContent = recentTotal ? recentTotal + " apps with update dates" : "";
+      } catch {
+        statusEl.textContent = "Could not load recent apps - try again.";
+      }
+    }
+
+    document.getElementById("recent-more").addEventListener("click", () => { recentPage++; loadRecent(false); });
 
     // Live file watch: while the Files tab is open, refresh the list so
     // uploads made on the raw file site appear on their own.

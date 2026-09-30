@@ -91,10 +91,48 @@ const SEU_REPO_JSON = "https://raw.githubusercontent.com/DatOneFlareon/The-SEU-a
 const SEU_REPO_URL = "https://github.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang";
 const SEU_REPO_PREVIEW = "https://raw.githubusercontent.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang/main/Ipa%20file/IMG_1508.jpeg";
 
-const IPA_FEED_URL = process.env.IPA_FEED_URL || "https://fastsign.dev/repo.json";
-const IPA_TTL_MS = 30 * 60 * 1000;
-let ipaCache = { at: 0, name: "", apps: [] };
-let ipaFetching = null;
+const IPA_SOURCES = [
+  { id: "fastsign", name: "Alan's Gigantic Repo", url: "https://fastsign.dev/repo.json" },
+  { id: "cypwn", name: "CyPwn IPA Library", url: "https://ipa.cypwn.xyz/cypwn.json" },
+  { id: "quantum", name: "Quantum Source", url: "https://quarksources.github.io/quantumsource.json" },
+  { id: "sidestore", name: "SideStore Team Picks", url: "https://community-apps.sidestore.io/sidecommunity.json" }
+];
+const FEED_TTL_MS = 30 * 60 * 1000;
+const feedCache = {};
+const feedFetching = {};
+
+function normApp(a) {
+  const v = (Array.isArray(a.versions) && a.versions[0]) || {};
+  return {
+    name: a.name, bundleID: a.bundleIdentifier || a.bundleID,
+    version: v.version || a.version, subtitle: a.subtitle,
+    date: v.date || a.versionDate || null,
+    size: v.size || a.size, iconURL: a.iconURL || a.icon,
+    downloadURL: v.downloadURL || a.downloadURL
+  };
+}
+
+async function getFeed(id) {
+  const src = IPA_SOURCES.find(s => s.id === id);
+  if (!src) throw new Error("bad source");
+  const now = Date.now(), c = feedCache[id];
+  if (c && c.apps.length && now - c.at < FEED_TTL_MS) return c;
+  if (feedFetching[id]) return feedFetching[id];
+  feedFetching[id] = (async () => {
+    const up = await fetchBig(src.url, 40e6);
+    if (up.status !== 200) throw new Error("feed error " + up.status);
+    const d = JSON.parse(up.body);
+    feedCache[id] = {
+      at: Date.now(), name: d.name || src.name,
+      apps: (Array.isArray(d.apps) ? d.apps : []).map(normApp).filter(a => a.name && a.downloadURL)
+    };
+    return feedCache[id];
+  })();
+  try { return await feedFetching[id]; }
+  finally { feedFetching[id] = null; }
+}
+
+const FEATURED_NAMES = ["Delta", "DolphiniOS", "PPSSPP", "RetroArch", "UTM SE", "StikDebug", "SideStore", "Scarlet", "Filza"];
 
 function fetchBig(url, maxBytes) {
   return new Promise((resolve, reject) => {
@@ -112,26 +150,7 @@ function fetchBig(url, maxBytes) {
 }
 
 async function getIpaFeed() {
-  const now = Date.now();
-  if (ipaCache.apps.length && now - ipaCache.at < IPA_TTL_MS) return ipaCache;
-  if (ipaFetching) return ipaFetching;
-  ipaFetching = (async () => {
-    const up = await fetchBig(IPA_FEED_URL, 40e6);
-    if (up.status !== 200) throw new Error("feed error " + up.status);
-    const d = JSON.parse(up.body);
-    ipaCache = {
-      at: Date.now(),
-      name: d.name || "IPA Library",
-      apps: (Array.isArray(d.apps) ? d.apps : []).map(a => ({
-        name: a.name, bundleID: a.bundleIdentifier || a.bundleID,
-        version: a.version, subtitle: a.subtitle, size: a.size,
-        iconURL: a.iconURL || a.icon, downloadURL: a.downloadURL
-      }))
-    };
-    return ipaCache;
-  })();
-  try { return await ipaFetching; }
-  finally { ipaFetching = null; }
+  return getFeed("fastsign");
 }
 
 function fetchGitHub(path) {
@@ -292,17 +311,18 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // IPA library search (cached upstream AltStore source). Gated.
+  // IPA library search (cached upstream AltStore sources). Gated.
   if (req.method === "GET" && url.pathname === "/api/ipas") {
     if (!validSession(parseCookies(req).seu_session)) {
       return send(res, 401, { ok: false, error: "unauthorized" });
     }
+    const source = url.searchParams.get("source") || "fastsign";
     const q = (url.searchParams.get("q") || "").trim().toLowerCase();
     if (q.length < 2) return send(res, 400, { ok: false, error: "query too short" });
     const page = Math.max(0, parseInt(url.searchParams.get("page") || "0", 10) || 0);
     const limit = Math.min(50, Math.max(1, parseInt(url.searchParams.get("limit") || "25", 10) || 25));
     try {
-      const feed = await getIpaFeed();
+      const feed = await getFeed(source);
       const hits = feed.apps.filter(a =>
         (a.name || "").toLowerCase().includes(q) || (a.bundleID || "").toLowerCase().includes(q));
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
@@ -310,6 +330,68 @@ const server = http.createServer(async (req, res) => {
         ok: true, source: feed.name, updatedAt: feed.at, total: hits.length, page,
         apps: hits.slice(page * limit, page * limit + limit)
       }));
+    } catch {
+      return send(res, 502, { ok: false, error: "ipa feed unreachable" });
+    }
+  }
+
+  // Source list with cached app counts. Gated.
+  if (req.method === "GET" && url.pathname === "/api/sources") {
+    if (!validSession(parseCookies(req).seu_session)) {
+      return send(res, 401, { ok: false, error: "unauthorized" });
+    }
+    return send(res, 200, IPA_SOURCES.map(s => ({
+      id: s.id, name: (feedCache[s.id] && feedCache[s.id].name) || s.name,
+      appCount: (feedCache[s.id] && feedCache[s.id].apps.length) || null,
+      updatedAt: (feedCache[s.id] && feedCache[s.id].at) || null
+    })));
+  }
+
+  // Recently added across all sources, newest first. Gated.
+  if (req.method === "GET" && url.pathname === "/api/recent") {
+    if (!validSession(parseCookies(req).seu_session)) {
+      return send(res, 401, { ok: false, error: "unauthorized" });
+    }
+    const page = Math.max(0, parseInt(url.searchParams.get("page") || "0", 10) || 0);
+    const limit = Math.min(50, Math.max(1, parseInt(url.searchParams.get("limit") || "25", 10) || 25));
+    try {
+      const feeds = await Promise.all(IPA_SOURCES.map(s => getFeed(s.id).catch(() => null)));
+      const all = [];
+      for (let i = 0; i < feeds.length; i++) {
+        if (!feeds[i]) continue;
+        for (const a of feeds[i].apps) {
+          const t = a.date ? Date.parse(a.date) : NaN;
+          if (!isNaN(t)) all.push({ ...a, dateMs: t, source: feeds[i].name });
+        }
+      }
+      all.sort((x, y) => y.dateMs - x.dateMs);
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      return res.end(JSON.stringify({
+        ok: true, total: all.length, page,
+        apps: all.slice(page * limit, page * limit + limit)
+      }));
+    } catch {
+      return send(res, 502, { ok: false, error: "ipa feed unreachable" });
+    }
+  }
+
+  // Featured apps resolved live from the sources. Gated.
+  if (req.method === "GET" && url.pathname === "/api/featured") {
+    if (!validSession(parseCookies(req).seu_session)) {
+      return send(res, 401, { ok: false, error: "unauthorized" });
+    }
+    try {
+      const feeds = await Promise.all(IPA_SOURCES.map(s => getFeed(s.id).catch(() => null)));
+      const out = [];
+      for (const name of FEATURED_NAMES) {
+        const want = name.toLowerCase();
+        for (const f of feeds) {
+          if (!f) continue;
+          const hit = f.apps.find(a => (a.name || "").toLowerCase() === want);
+          if (hit) { out.push({ ...hit, source: f.name }); break; }
+        }
+      }
+      return send(res, 200, out);
     } catch {
       return send(res, 502, { ok: false, error: "ipa feed unreachable" });
     }
