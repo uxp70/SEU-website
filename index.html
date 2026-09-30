@@ -109,17 +109,32 @@
       status.hidden = !msg;
     }
 
+    function goSection(name) {
+      showSection(name);
+      if (name === "certs") loadCerts(false);
+      if (name === "files") loadFiles(false);
+    }
+
     function renderCards(boxId, items) {
       const box = document.getElementById(boxId);
       box.innerHTML = "";
       for (const c of (items || [])) {
         const el = document.createElement("article");
-        el.className = "card";
+        el.className = "card" + (c.goto ? " card-link" : "");
         const h = document.createElement("h2");
         h.textContent = c.title;
         const p = document.createElement("p");
         p.textContent = c.text;
         el.append(h, p);
+        if (c.goto) {
+          el.tabIndex = 0;
+          el.setAttribute("role", "button");
+          const go = () => goSection(c.goto);
+          el.addEventListener("click", go);
+          el.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); }
+          });
+        }
         box.append(el);
       }
     }

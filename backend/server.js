@@ -160,8 +160,9 @@ const server = http.createServer(async (req, res) => {
       title: "SEU website",
       welcome: "Welcome to HQ",
       cards: [
-        { title: "Projects", text: "SEU builds and experiments live here." },
-        { title: "Links", text: "Add quick links here next." },
+        { title: "Certificates", text: "Browse and download signing certs.", goto: "certs" },
+        { title: "Raw File Storage", text: "Files you upload, with raw links.", goto: "files" },
+        { title: "Projects", text: "SEU builds and experiments.", goto: "projects" },
         { title: "Status", text: "All systems normal." }
       ],
       projects: [
