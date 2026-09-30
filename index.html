@@ -582,7 +582,7 @@
       if (icon) fd.append("icon", icon);
       statusEl.textContent = "Uploading and signing - big IPAs take a few minutes...";
       try {
-        const r = await api("/api/sign", { method: "POST", credentials: "include", body: fd });
+        const r = await api("/api/sign", { method: "POST", body: fd, timeout: 600000 });
         if (!r.ok) {
           let msg = "Signing failed";
           try { msg = (await r.json()).error || msg; } catch {}
@@ -936,7 +936,16 @@
       options = options || {};
       options.credentials = "include";
       options.headers = { ...(options.headers || {}), ...authHeaders() };
-      return api(path, options);
+      // Hung requests must fail fast so retries actually cycle (mobile
+      // networks drop long-idle connections; Render free also cold-starts).
+      if (!options.signal && options.timeout !== 0) {
+        const ms = options.timeout || 25000;
+        const ctrl = new AbortController();
+        options.signal = ctrl.signal;
+        setTimeout(() => ctrl.abort(), ms);
+      }
+      delete options.timeout;
+      return fetch(API_BASE + path, options);
     }
 
     async function fetchJSON(path, options) {
