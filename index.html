@@ -370,22 +370,30 @@
         const meta = document.createElement("p");
         meta.className = "cert-meta";
         meta.textContent = fmtSize(f.size);
-        const link = document.createElement("p");
-        link.className = "raw-link";
-        link.textContent = f.raw;
-        const row = document.createElement("p");
-        row.className = "dl-row";
-        const copy = document.createElement("a");
-        copy.textContent = "copy";
-        copy.href = "#";
-        copy.addEventListener("click", (e) => { e.preventDefault(); copyText(f.raw); });
-        const open = document.createElement("a");
-        open.textContent = "open";
-        open.href = f.raw;
-        open.target = "_blank";
-        open.rel = "noopener";
-        row.append(copy, document.createTextNode(" "), open);
-        el.append(h, meta, link, row);
+        el.append(h, meta);
+        if (f.raw) {
+          const link = document.createElement("p");
+          link.className = "raw-link";
+          link.textContent = f.raw;
+          const row = document.createElement("p");
+          row.className = "dl-row";
+          const copy = document.createElement("a");
+          copy.textContent = "copy";
+          copy.href = "#";
+          copy.addEventListener("click", (e) => { e.preventDefault(); copyText(f.raw); });
+          const open = document.createElement("a");
+          open.textContent = "open";
+          open.href = f.raw;
+          open.target = "_blank";
+          open.rel = "noopener";
+          row.append(copy, document.createTextNode(" "), open);
+          el.append(link, row);
+        } else {
+          const cooking = document.createElement("p");
+          cooking.className = "cert-meta";
+          cooking.textContent = "Raw link still cooking - check back shortly.";
+          el.append(cooking);
+        }
         box.append(el);
       }
       if (!items.length) {

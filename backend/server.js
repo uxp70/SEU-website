@@ -198,9 +198,28 @@ const server = http.createServer(async (req, res) => {
       const up = await fetchGitHub(`/repos/${RFW_OWNER}/${RFW_REPO}/contents/uploads?ref=${encodeURIComponent(RFW_BRANCH)}`);
       if (up.status !== 200) return send(res, 502, { ok: false, error: "storage unreachable" });
       const items = JSON.parse(up.body);
-      const files = (Array.isArray(items) ? items : [])
-        .filter(x => x.type === "file" && !/\.part\d+$/.test(x.name) && x.name !== "files-index.json" && !x.name.endsWith(".manifest.json"))
-        .map(x => ({ name: x.name, size: x.size, raw: x.download_url, path: x.path }));
+      const list = Array.isArray(items) ? items : [];
+      // Big-file index: manifest path -> { url } release-asset link.
+      let index = {};
+      try {
+        const ix = await fetchUpstream(`https://raw.githubusercontent.com/${RFW_OWNER}/${RFW_REPO}/${RFW_BRANCH}/uploads/files-index.json?ts=${Date.now()}`);
+        if (ix.status === 200) index = JSON.parse(ix.body);
+      } catch { /* index optional: big files show as cooking */ }
+      const files = [];
+      for (const x of list) {
+        if (x.type !== "file" || /\.part\d+$/.test(x.name) || x.name === "files-index.json") continue;
+        if (x.name.endsWith(".manifest.json")) {
+          let original = x.name, size = x.size;
+          try {
+            const m = JSON.parse((await fetchUpstream(x.download_url + `?ts=${Date.now()}`)).body);
+            if (m && m.type === "bigfile") { original = m.original || original; size = m.size || size; }
+          } catch { /* keep manifest defaults */ }
+          const hit = index[x.path] || {};
+          files.push({ name: original, size, raw: hit.url || null, path: x.path, big: true });
+        } else {
+          files.push({ name: x.name, size: x.size, raw: x.download_url, path: x.path });
+        }
+      }
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       return res.end(JSON.stringify(files));
     } catch {
