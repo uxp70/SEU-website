@@ -40,11 +40,17 @@
     <main>
       <div class="topbar">
         <button id="nav-toggle" type="button" aria-label="Toggle sidebar">&#9776;</button>
+        <span id="crumb">Home</span>
       </div>
       <section id="sec-home">
-        <img class="logo logo-home" src="https://raw.githubusercontent.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang/refs/heads/main/Ipa%20file/Seu%20logo.png" alt="SEU logo" />
-        <h1 id="home-title">SEU website</h1>
-        <p id="home-welcome" class="welcome"></p>
+        <div class="hero">
+          <img class="logo logo-home" src="https://raw.githubusercontent.com/DatOneFlareon/The-SEU-app-repo-for-the-gangalang/refs/heads/main/Ipa%20file/Seu%20logo.png" alt="SEU logo" />
+          <div>
+            <h1 id="home-title">SEU website</h1>
+            <p id="home-welcome" class="welcome"></p>
+          </div>
+        </div>
+        <div id="home-stats" class="chips"></div>
         <div id="cards" class="cards"></div>
       </section>
 
@@ -245,7 +251,19 @@
         const p = document.createElement("p");
         p.textContent = c.text;
         el.append(h, p);
-        if (c.lines && c.lines.length) {
+        if (c.rows && c.rows.length) {
+          const dl = document.createElement("dl");
+          dl.className = "status-rows";
+          for (const r of c.rows) {
+            const dt = document.createElement("dt");
+            dt.textContent = r.label;
+            const dd = document.createElement("dd");
+            dd.className = "dot-" + (r.ok === true ? "ok" : r.ok === false ? "bad" : "idle");
+            dd.textContent = r.value;
+            dl.append(dt, dd);
+          }
+          el.append(dl);
+        } else if (c.lines && c.lines.length) {
           const ul = document.createElement("ul");
           ul.className = "status-lines";
           for (const ln of c.lines) {
@@ -282,9 +300,35 @@
       }
     }
 
+    function fmtNum(n) {
+      return Number(n || 0).toLocaleString("en-US");
+    }
+
+    function renderStats(stats) {
+      const box = document.getElementById("home-stats");
+      box.innerHTML = "";
+      if (!stats) return;
+      const items = [
+        [fmtNum(stats.apps) + " apps", "indexed"],
+        [stats.sources + "/" + stats.sourcesTotal + " sources", "live"],
+        [fmtNum(stats.files) + " files", "stored"]
+      ];
+      for (const [big, small] of items) {
+        const el = document.createElement("div");
+        el.className = "chip";
+        const b = document.createElement("strong");
+        b.textContent = big;
+        const s = document.createElement("span");
+        s.textContent = small;
+        el.append(b, s);
+        box.append(el);
+      }
+    }
+
     function showSite(data) {
       document.getElementById("home-title").textContent = data.title || "SEU website";
       document.getElementById("home-welcome").textContent = data.welcome || "";
+      renderStats(data.stats);
       renderCards("cards", data.cards);
       renderCards("project-cards", data.projects);
       renderCards("future-cards", data.future);
@@ -298,6 +342,9 @@
     function showSection(name) {
       for (const btn of document.querySelectorAll(".sidebar nav button")) {
         btn.classList.toggle("active", btn.dataset.section === name);
+        if (btn.dataset.section === name) {
+          document.getElementById("crumb").textContent = btn.textContent;
+        }
       }
       for (const sec of document.querySelectorAll("main section")) {
         sec.hidden = sec.id !== "sec-" + name;

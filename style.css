@@ -192,10 +192,134 @@ body {
   border: 1px solid var(--line);
 }
 
+::selection {
+  background: rgba(91, 140, 255, 0.35);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 8px;
+}
+
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
 .topbar {
   display: flex;
   align-items: center;
+  gap: 0.75rem;
   margin-bottom: 1.25rem;
+}
+
+#crumb {
+  font-weight: 700;
+  color: var(--mut);
+  font-size: 0.95rem;
+}
+
+.hero {
+  display: flex;
+  gap: 1.25rem;
+  align-items: center;
+  margin-bottom: 1.25rem;
+}
+
+.hero h1 {
+  margin: 0 0 0.2rem;
+}
+
+.hero .welcome {
+  margin: 0;
+}
+
+.logo-home {
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+
+.chips {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.5rem;
+}
+
+.chip {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.6rem 1rem;
+  display: flex;
+  flex-direction: column;
+  min-width: 110px;
+}
+
+.chip strong {
+  font-size: 1.2rem;
+  letter-spacing: -0.01em;
+  background: linear-gradient(90deg, #fff, #9db9ff);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.chip span {
+  font-size: 0.8rem;
+  color: var(--mut);
+}
+
+.status-rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.4rem 0.8rem;
+  margin: 0.75rem 0 0;
+  padding: 0.75rem 0 0;
+  border-top: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+
+.status-rows dt {
+  color: var(--mut);
+  white-space: nowrap;
+}
+
+.status-rows dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.status-rows dd::before {
+  content: "\25CF  ";
+  font-size: 0.65rem;
+}
+
+.dot-ok::before { color: #4ade80; }
+.dot-bad::before { color: var(--danger); }
+.dot-idle::before { color: var(--mut); }
+
+main section {
+  animation: rise 0.25s ease;
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  main section { animation: none; }
+  .card-link:hover { transform: none; }
 }
 
 #nav-toggle {

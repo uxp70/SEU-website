@@ -710,32 +710,80 @@ function cors(req, res) {
 }
 
 function statusLines() {
-  const lines = ["Backend: online"];
+  return statusPayload().rows.map(r => `${r.label}: ${r.value}`);
+}
+
+function fmtAge(ms) {
+  if (ms < 0) ms = 0;
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+// Component health observed from real traffic (no extra polling).
+const BOOT_AT = Date.now();
+const componentHealth = {
+  certs: { at: 0, ok: null },
+  storage: { at: 0, ok: null },
+  signer: { at: 0, ok: null }
+};
+
+function statusPayload() {
   let total = 0, n = 0;
+  const perSource = [];
   for (const s of IPA_SOURCES) {
     const c = feedCache[s.id];
-    if (c && c.apps.length) { n++; total += c.apps.length; }
+    if (c && c.apps.length) {
+      n++;
+      total += c.apps.length;
+      perSource.push({ label: c.name, value: `${c.apps.length.toLocaleString("en-US")} apps - refreshed ${fmtAge(Date.now() - c.at)}`, ok: true });
+    } else {
+      perSource.push({ label: s.name, value: "not loaded yet", ok: null });
+    }
   }
-  lines.push(n
-    ? `Libraries: ${n}/${IPA_SOURCES.length} loaded (${total.toLocaleString("en-US")} apps indexed)`
-    : "Libraries: warming up - open the IPAs tab");
-  if (filesCache.data.length) {
-    lines.push(`Files: ${filesCache.data.length} stored (${filesCache.data.filter(f => f.big).length} big)`);
-  } else {
-    lines.push("Files: storage connected");
-  }
-  lines.push("Session: 12h, all sections gated");
-  return lines;
+  const rows = [
+    { label: "Backend", value: `online - up ${fmtAge(Date.now() - BOOT_AT).replace(" ago", "")}`, ok: true },
+    { label: "Session", value: "12h, IP-bound, all sections gated", ok: true },
+    {
+      label: "Libraries",
+      value: n ? `${n}/${IPA_SOURCES.length} loaded - ${total.toLocaleString("en-US")} apps indexed` : "warming up - open the IPAs tab",
+      ok: n ? true : null
+    },
+    ...perSource,
+    componentHealth.certs.at
+      ? { label: "Cert provider", value: componentHealth.certs.ok ? `reachable - checked ${fmtAge(Date.now() - componentHealth.certs.at)}` : "last check failed", ok: componentHealth.certs.ok }
+      : { label: "Cert provider", value: "not checked yet - open the Certs tab", ok: null },
+    filesCache.data.length
+      ? { label: "File storage", value: `${filesCache.data.length} files (${filesCache.data.filter(f => f.big).length} big)`, ok: true }
+      : componentHealth.storage.at
+        ? { label: "File storage", value: "last check failed", ok: false }
+        : { label: "File storage", value: "connected - open Raw File Storage", ok: null },
+    componentHealth.signer.at
+      ? { label: "Signer", value: componentHealth.signer.ok ? "zsign ready" : "signer unavailable", ok: componentHealth.signer.ok }
+      : { label: "Signer", value: "not checked yet", ok: null }
+  ];
+  const stats = {
+    apps: total,
+    sources: n,
+    sourcesTotal: IPA_SOURCES.length,
+    files: filesCache.data.length
+  };
+  return { rows, stats };
 }
 
 function homePayload() {
   const c = siteContent();
+  const status = statusPayload();
   return {
     ok: true,
     title: c.title || "SEU website",
     welcome: c.welcome || "Welcome",
+    stats: status.stats,
     cards: (c.cards && c.cards.length ? c.cards : DEFAULT_CONTENT.cards).map(card =>
-      card.title === "Status" && !card.lines ? { ...card, lines: statusLines() } : card),
+      card.title === "Status" && !card.rows ? { ...card, lines: status.rows.map(r => `${r.label}: ${r.value}`), rows: status.rows } : card),
     projects: c.projects || [],
     future: c.future || [],
     links: c.links || [],
@@ -847,9 +895,11 @@ const server = http.createServer(async (req, res) => {
     }
     try {
       const files = await getFiles();
+      componentHealth.storage = { at: Date.now(), ok: true };
       res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" });
       return res.end(JSON.stringify(files));
     } catch {
+      componentHealth.storage = { at: Date.now(), ok: false };
       return send(res, 502, { ok: false, error: "storage unreachable" });
     }
   }
@@ -993,11 +1043,16 @@ const server = http.createServer(async (req, res) => {
     const amount = Math.min(200, Math.max(1, parseInt(url.searchParams.get("amount") || "50", 10) || 50));
     try {
       const up = await fetchUpstream(`https://sideloading.net/api/certificates/list/${filter}/${amount}`);
-      if (up.status !== 200) return send(res, 502, { ok: false, error: "cert provider error" });
+      if (up.status !== 200) {
+        componentHealth.certs = { at: Date.now(), ok: false };
+        return send(res, 502, { ok: false, error: "cert provider error" });
+      }
       JSON.parse(up.body); // validate JSON before relaying
+      componentHealth.certs = { at: Date.now(), ok: true };
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(up.body);
     } catch {
+      componentHealth.certs = { at: Date.now(), ok: false };
       return send(res, 502, { ok: false, error: "cert provider unreachable" });
     }
   }
@@ -1011,8 +1066,10 @@ const server = http.createServer(async (req, res) => {
       const bin = await getZsign();
       const out = await runCmd(bin, []).catch(e => e);
       const text = ((out.stdout || "") + "\n" + (out.stderr || "")).split("\n").slice(0, 3).join(" ").slice(0, 200);
+      componentHealth.signer = { at: Date.now(), ok: true };
       return send(res, 200, { ok: true, zsign: text.trim() || "ready" });
     } catch (e) {
+      componentHealth.signer = { at: Date.now(), ok: false };
       return send(res, 502, { ok: false, error: "signer unavailable" });
     }
   }
