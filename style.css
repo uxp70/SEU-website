@@ -139,6 +139,14 @@ body {
   top: 0;
   height: 100vh;
   box-sizing: border-box;
+  overflow: hidden;
+  transition: width 0.28s ease, padding 0.28s ease, opacity 0.2s ease, border-color 0.28s ease;
+}
+
+@media (min-width: 861px) {
+  .sidebar > * {
+    min-width: 200px;
+  }
 }
 
 .brand {
@@ -320,6 +328,7 @@ main section {
 @media (prefers-reduced-motion: reduce) {
   main section { animation: none; }
   .card-link:hover { transform: none; }
+  .sidebar { transition: none; }
 }
 
 #nav-toggle {
@@ -337,7 +346,10 @@ main section {
 }
 
 body.nav-closed .sidebar {
-  display: none;
+  width: 0;
+  padding: 1.75rem 0;
+  opacity: 0;
+  border-right-color: transparent;
 }
 
 .status-lines {
@@ -854,6 +866,7 @@ main h1 {
   }
   .sidebar {
     width: 100%;
+    max-height: 400px;
     height: auto;
     position: static;
     flex-direction: row;
@@ -861,6 +874,15 @@ main h1 {
     flex-wrap: wrap;
     gap: 0.75rem;
     padding: 1rem;
+    transition: max-height 0.28s ease, padding 0.28s ease, opacity 0.2s ease;
+  }
+  body.nav-closed .sidebar {
+    width: 100%;
+    max-height: 0;
+    opacity: 0;
+    padding: 0 1rem;
+    border: 0;
+    overflow: hidden;
   }
   .brand {
     width: 100%;
